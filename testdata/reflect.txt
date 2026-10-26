@@ -537,6 +537,10 @@ addressable 99: 300
 reflect.MakeMap padded key:
 padded lookup: 100
 
+reflect.MakeMap pair key:
+compiled lookup: 12
+reflect lookup: 34
+
 alignment / offset:
 struct{[0]func(); byte}: true
 

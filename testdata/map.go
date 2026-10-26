@@ -70,6 +70,33 @@ func main() {
 	delete(nilbinmap, 4)
 	println("nilbinmap:", nilbinmap[5])
 
+	var nilwordmap map[int64]string
+	println("nilwordmap:", nilwordmap[5] == "")
+
+	// 8-byte keys and values that are stored indirectly
+	bigValueMap := map[uint64][40]int{1 << 40: {1: 7}}
+	println("bigValueMap:", bigValueMap[1<<40][1], bigValueMap[0][1])
+
+	// Keys passed to the runtime by value, with enough entries to grow the map.
+	type pair struct{ A, B uint32 }
+	pairMap := map[pair]int{}
+	ifaceGrowMap := map[interface{}]int{}
+	u32Map := map[uint32]int{}
+	for i := range 20 {
+		pairMap[pair{uint32(i), uint32(i * 3)}] = i
+		ifaceGrowMap[i] = i
+		u32Map[uint32(i)] = i
+	}
+	pairMap[pair{5, 15}] = 50
+	ifaceGrowMap[5] = 50
+	u32Map[5] = 50
+	delete(pairMap, pair{7, 21})
+	delete(ifaceGrowMap, 7)
+	delete(u32Map, 7)
+	println("pairMap:", len(pairMap), pairMap[pair{5, 15}], pairMap[pair{7, 21}], pairMap[pair{5, 16}], pairMap[pair{19, 57}])
+	println("ifaceGrowMap:", len(ifaceGrowMap), ifaceGrowMap[5], ifaceGrowMap[7], ifaceGrowMap[19])
+	println("u32Map:", len(u32Map), u32Map[5], u32Map[7], u32Map[19])
+
 	arrKey := ArrayKey([4]byte{4, 3, 2, 1})
 	println(testMapArrayKey[arrKey])
 	testMapArrayKey[arrKey] = 5555

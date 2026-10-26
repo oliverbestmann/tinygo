@@ -54,6 +54,11 @@ nilmap: 0
 4
 42
 nilbinmap: 0
+nilwordmap: true
+bigValueMap: 7 0
+pairMap: 19 50 0 0 19
+ifaceGrowMap: 19 50 0 19
+u32Map: 19 50 0 19
 4321
 5555
 itfMap[3]: 0

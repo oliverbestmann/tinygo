@@ -805,6 +805,7 @@ func testImplements() {
 	testMakeMapCompositeKey()
 	testMakeMapInterfaceKey()
 	testMakeMapPaddedKey()
+	testMakeMapPairKey()
 }
 
 type IfaceNode interface {
@@ -975,4 +976,20 @@ func testMakeMapPaddedKey() {
 	} else {
 		println("padded lookup: not found")
 	}
+}
+
+type pairKey struct {
+	A, B uint32
+}
+
+// testMakeMapPairKey tests that reflect and compiled code agree on the hash of
+// a struct key without padding, which both treat as plain bytes.
+func testMakeMapPairKey() {
+	println("\nreflect.MakeMap pair key:")
+	rv := reflect.MakeMap(reflect.TypeOf(map[pairKey]int{}))
+	rv.SetMapIndex(reflect.ValueOf(pairKey{1, 2}), reflect.ValueOf(12))
+	m := rv.Interface().(map[pairKey]int)
+	m[pairKey{3, 4}] = 34
+	println("compiled lookup:", m[pairKey{1, 2}])
+	println("reflect lookup:", rv.MapIndex(reflect.ValueOf(pairKey{3, 4})).Int())
 }

@@ -50,7 +50,7 @@ func (b *builder) createMakeMap(expr *ssa.MakeMap) (llvm.Value, error) {
 	if t, ok := keyType.(*types.Basic); ok && t.Info()&types.IsString != 0 {
 		hashFn = b.getRuntimeFunctionValue("hashmapStringPtrHash", hashmapKeyHashSignature())
 		equalFn = b.getRuntimeFunctionValue("hashmapStringEqual", hashmapKeyEqualSignature())
-	} else if isBinaryComparable(keyType) {
+	} else if b.isBinaryKey(keyType) {
 		hashFn = b.getRuntimeFunctionValue("hash32", hashmapKeyHashSignature())
 		equalFn = b.getRuntimeFunctionValue("memequal", hashmapKeyEqualSignature())
 	} else {
@@ -162,17 +162,20 @@ func (b *builder) createMapLookup(keyType, valueType types.Type, m llvm.Value, k
 	// Do the lookup. How it is done depends on the key type.
 	var commaOkValue llvm.Value
 	keyType = keyType.Underlying()
-	if t, ok := keyType.(*types.Basic); ok && t.Info()&types.IsString != 0 {
-		// key is a string
-		params := []llvm.Value{m, b.getValue(key, getPos(key)), mapValueAlloca, mapValueSize}
-		commaOkValue = b.createRuntimeCall("hashmapStringGet", params, "")
+	if kind, k := b.mapKeyByValue(keyType, b.getValue(key, getPos(key))); kind != "" {
+		params := []llvm.Value{m, k, mapValueAlloca, mapValueSize}
+		if kind == "Interface" {
+			commaOkValue = b.createRuntimeInvoke("hashmapInterfaceGet", params, "")
+		} else {
+			commaOkValue = b.createRuntimeCall("hashmap"+kind+"Get", params, "")
+		}
 	} else {
 		// Key stored at actual type: either binary-comparable or with
 		// compiler-generated hash/equal.
 		mapKey := b.getValueStorage(key, "hashmap.key")
 		params := []llvm.Value{m, mapKey.ptr, mapValueAlloca, mapValueSize}
 		fnName := "hashmapBinaryGet"
-		if !isBinaryComparable(keyType) {
+		if !b.isBinaryKey(keyType) {
 			fnName = "hashmapGenericGet"
 		}
 		if fnName == "hashmapGenericGet" {
@@ -192,15 +195,14 @@ func (b *builder) createMapLookup(keyType, valueType types.Type, m llvm.Value, k
 func (b *builder) createMapUpdate(keyType types.Type, m llvm.Value, key, value ssa.Value, pos token.Pos) {
 	storedValue := b.getValueStorage(value, "hashmap.value")
 	keyType = keyType.Underlying()
-	if t, ok := keyType.(*types.Basic); ok && t.Info()&types.IsString != 0 {
-		// key is a string
-		params := []llvm.Value{m, b.getValue(key, getPos(key)), storedValue.ptr}
-		b.createRuntimeInvoke("hashmapStringSet", params, "")
+	if kind, k := b.mapKeyByValue(keyType, b.getValue(key, getPos(key))); kind != "" {
+		params := []llvm.Value{m, k, storedValue.ptr}
+		b.createRuntimeInvoke("hashmap"+kind+"Set", params, "")
 	} else {
 		// Key stored at actual type.
 		keyStorage := b.getValueStorage(key, "hashmap.key")
 		fnName := "hashmapBinarySet"
-		if !isBinaryComparable(keyType) {
+		if !b.isBinaryKey(keyType) {
 			fnName = "hashmapGenericSet"
 		}
 		params := []llvm.Value{m, keyStorage.ptr, storedValue.ptr}
@@ -214,17 +216,20 @@ func (b *builder) createMapUpdate(keyType types.Type, m llvm.Value, key, value s
 // function. It is the implementation of the Go delete() builtin.
 func (b *builder) createMapDelete(keyType types.Type, m, key llvm.Value, pos token.Pos) error {
 	keyType = keyType.Underlying()
-	if t, ok := keyType.(*types.Basic); ok && t.Info()&types.IsString != 0 {
-		// key is a string
-		params := []llvm.Value{m, key}
-		b.createRuntimeCall("hashmapStringDelete", params, "")
+	if kind, k := b.mapKeyByValue(keyType, key); kind != "" {
+		params := []llvm.Value{m, k}
+		if kind == "Interface" {
+			b.createRuntimeInvoke("hashmapInterfaceDelete", params, "")
+		} else {
+			b.createRuntimeCall("hashmap"+kind+"Delete", params, "")
+		}
 		return nil
 	} else {
 		// Key stored at actual type.
 		keyAlloca, keySize := b.createTemporaryAlloca(key.Type(), "hashmap.key")
 		b.CreateStore(key, keyAlloca)
 		fnName := "hashmapBinaryDelete"
-		if !isBinaryComparable(keyType) {
+		if !b.isBinaryKey(keyType) {
 			fnName = "hashmapGenericDelete"
 		}
 		params := []llvm.Value{m, keyAlloca}
@@ -289,6 +294,59 @@ func isBinaryComparable(keyType types.Type) bool {
 	default:
 		return false
 	}
+}
+
+// isBinaryKey reports whether map keys of this type are hashed with hash32 and
+// compared with memequal. Unlike isBinaryComparable it allows structs, as long
+// as they have no padding and no blank fields, which == ignores.
+func (c *compilerContext) isBinaryKey(keyType types.Type) bool {
+	switch t := keyType.Underlying().(type) {
+	case *types.Array:
+		return c.isBinaryKey(t.Elem())
+	case *types.Struct:
+		var size uint64
+		for i := range t.NumFields() {
+			field := t.Field(i)
+			if field.Name() == "_" || !c.isBinaryKey(field.Type()) {
+				return false
+			}
+			size += c.targetData.TypeAllocSize(c.getLLVMType(field.Type()))
+		}
+		return size == c.targetData.TypeAllocSize(c.getLLVMType(t))
+	default:
+		return isBinaryComparable(t)
+	}
+}
+
+// mapKeyByValue returns the kind of key used in the names of runtime map
+// functions that take the key by value, and the key converted for them. It
+// returns an empty kind for keys that are passed by pointer.
+func (b *builder) mapKeyByValue(keyType types.Type, key llvm.Value) (string, llvm.Value) {
+	switch t := keyType.Underlying().(type) {
+	case *types.Basic:
+		if t.Info()&types.IsString != 0 {
+			return "String", key
+		}
+	case *types.Interface:
+		return "Interface", key
+	}
+	size := b.targetData.TypeAllocSize(key.Type())
+	if (size != 4 && size != 8) || !b.isBinaryKey(keyType) {
+		return "", key
+	}
+	intType := b.ctx.IntType(int(size * 8))
+	switch key.Type().TypeKind() {
+	case llvm.IntegerTypeKind:
+		return fmt.Sprintf("Binary%d", size*8), key
+	case llvm.PointerTypeKind:
+		return fmt.Sprintf("Binary%d", size*8), b.CreatePtrToInt(key, intType, "")
+	}
+	// Arrays and structs are converted through memory.
+	ptr, allocaSize := b.createTemporaryAlloca(intType, "hashmap.key")
+	b.CreateStore(key, ptr)
+	key = b.CreateLoad(intType, ptr, "")
+	b.emitLifetimeEnd(ptr, allocaSize)
+	return fmt.Sprintf("Binary%d", size*8), key
 }
 
 // hashmapKeyHashSignature returns the Go type signature for hashmap key hash

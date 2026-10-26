@@ -373,7 +373,7 @@ func (c *compilerContext) getTypeCode(typ types.Type) llvm.Value {
 			metabyte |= 1 << 6
 		}
 
-		if isBinaryComparable(typ) {
+		if c.isBinaryKey(typ) {
 			metabyte |= 1 << 7
 		}
 
