@@ -379,8 +379,11 @@ func (c *compilerContext) canonicalFunctionName(f *ssa.Function) string {
 // //export or //go:noinline.
 func (c *compilerContext) parsePragmas(info *functionInfo, f *ssa.Function) {
 	syntax := f.Syntax()
+	pkg := f.Pkg
 	if f.Origin() != nil {
+		// Instantiated generic functions have no syntax and no package.
 		syntax = f.Origin().Syntax()
+		pkg = f.Origin().Pkg
 	}
 	if syntax == nil {
 		return
@@ -474,7 +477,7 @@ func (c *compilerContext) parsePragmas(info *functionInfo, f *ssa.Function) {
 			info.wasmName = info.linkName
 			info.exported = true
 		case "//go:interrupt":
-			if c.checkDefinition(hasBody, comment, pragma) && c.checkUnsafe(f.Pkg, comment, pragma) {
+			if c.checkDefinition(hasBody, comment, pragma) && c.checkUnsafe(pkg, comment, pragma) {
 				info.interrupt = true
 			}
 		case "//go:wasm-module":
@@ -537,7 +540,7 @@ func (c *compilerContext) parsePragmas(info *functionInfo, f *ssa.Function) {
 			// This is a slightly looser requirement than what gc uses: gc
 			// requires the file to import "unsafe", not the package as a
 			// whole.
-			if slices.Contains(f.Pkg.Pkg.Imports(), types.Unsafe) {
+			if slices.Contains(pkg.Pkg.Imports(), types.Unsafe) {
 				info.linkName = parts[2]
 			}
 		case "//go:section":
@@ -548,7 +551,7 @@ func (c *compilerContext) parsePragmas(info *functionInfo, f *ssa.Function) {
 				c.addPragmaError(comment, fmt.Sprintf("expected one parameter to //go:section, not %d", len(parts)-1))
 				continue
 			}
-			if c.checkDefinition(hasBody, comment, pragma) && c.checkUnsafe(f.Pkg, comment, pragma) {
+			if c.checkDefinition(hasBody, comment, pragma) && c.checkUnsafe(pkg, comment, pragma) {
 				info.section = parts[1]
 				info.inline = inlineNone
 			}
@@ -557,7 +560,7 @@ func (c *compilerContext) parsePragmas(info *functionInfo, f *ssa.Function) {
 			// runtime functions.
 			// This is somewhat dangerous and thus only imported in packages
 			// that import unsafe.
-			if c.checkDefinition(hasBody, comment, pragma) && c.checkUnsafe(f.Pkg, comment, pragma) {
+			if c.checkDefinition(hasBody, comment, pragma) && c.checkUnsafe(pkg, comment, pragma) {
 				info.nobounds = true
 			}
 		case "//go:noescape":

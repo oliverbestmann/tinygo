@@ -59,9 +59,11 @@ type Int interface {
 }
 
 // Same for generic functions (but the compiler may miss the pragma due to it
-// being generic).
+// being generic). The go:nobounds pragma checks the package of the function,
+// which needs the origin of the instantiated function.
 //
 //go:noinline
+//go:nobounds
 func noinlineGenericFunc[T Int]() {
 }
 
