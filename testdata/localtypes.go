@@ -409,6 +409,52 @@ func main() {
 	// Closures in instances with same-named local type arguments.
 	expect("closureHolder[Item#1] closure", closureInstA() == 1)
 	expect("closureHolder[Item#2] closure", closureInstB() == 2)
+
+	// Promoted method wrappers of same-named local types.
+	expect("promotedA *T.ID", promotedA().ID() == 1)
+	expect("promotedB *T.ID", promotedB().ID() == 2)
+	expect("promotedA T.ID", promotedValueA().ID() == 1)
+	expect("promotedB T.ID", promotedValueB().ID() == 2)
+	expect("promotedA bound and thunk", promotedFuncsA() == 11)
+	expect("promotedB bound and thunk", promotedFuncsB() == 22)
+}
+
+type idBase struct{ id int }
+
+func (b idBase) ID() int { return b.id }
+
+type ider interface{ ID() int }
+
+func promotedA() ider {
+	type T struct {
+		idBase
+		a int
+	}
+	return &T{idBase: idBase{1}}
+}
+
+func promotedB() ider {
+	type T struct {
+		x [3]int
+		idBase
+	}
+	return &T{idBase: idBase{2}}
+}
+
+func promotedValueA() ider {
+	type T struct {
+		idBase
+		a int
+	}
+	return T{idBase: idBase{1}}
+}
+
+func promotedValueB() ider {
+	type T struct {
+		x [3]int
+		idBase
+	}
+	return T{idBase: idBase{2}}
 }
 
 type closureHolder[T any] struct{ v T }
@@ -423,4 +469,24 @@ func closureInstA() int {
 func closureInstB() int {
 	type Item struct{ B, C int }
 	return closureHolder[Item]{Item{2, 3}}.get()().B
+}
+
+func promotedFuncsA() int {
+	type T struct {
+		idBase
+		a int
+	}
+	v := T{idBase: idBase{1}}
+	bound, thunk := v.ID, T.ID
+	return bound()*10 + thunk(v)
+}
+
+func promotedFuncsB() int {
+	type T struct {
+		x [3]int
+		idBase
+	}
+	v := T{idBase: idBase{2}}
+	bound, thunk := v.ID, T.ID
+	return bound()*10 + thunk(v)
 }

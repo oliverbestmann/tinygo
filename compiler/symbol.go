@@ -374,6 +374,13 @@ func (c *compilerContext) canonicalFunctionName(f *ssa.Function) string {
 		// same-named) local type arguments get different names.
 		return c.canonicalFunctionName(parent) + f.Name()[len(parent.Name()):]
 	}
+	if recv := syntheticReceiverType(f); recv != nil && len(typeArgs) == 0 {
+		// Method wrappers of function-local types: RelString doesn't
+		// distinguish same-named local types, the type code name does.
+		if name, isLocal := c.getTypeCodeName(recv); isLocal {
+			return "(" + name + ")." + f.Name()
+		}
+	}
 	if len(typeArgs) == 0 {
 		return f.RelString(nil)
 	}
@@ -382,6 +389,22 @@ func (c *compilerContext) canonicalFunctionName(f *ssa.Function) string {
 		parts[i], _ = c.getTypeCodeName(ta)
 	}
 	return f.Origin().RelString(nil) + "[" + strings.Join(parts, ",") + "]"
+}
+
+// syntheticReceiverType returns the receiver type of a synthetic method
+// wrapper, bound method wrapper or method thunk, or nil for other functions.
+func syntheticReceiverType(f *ssa.Function) types.Type {
+	switch {
+	case f.Synthetic == "":
+		return nil
+	case f.Signature.Recv() != nil:
+		return f.Signature.Recv().Type()
+	case strings.HasPrefix(f.Synthetic, "bound method wrapper for ") && len(f.FreeVars) > 0:
+		return f.FreeVars[0].Type()
+	case strings.HasPrefix(f.Synthetic, "thunk for ") && f.Signature.Params().Len() > 0:
+		return f.Signature.Params().At(0).Type()
+	}
+	return nil
 }
 
 // parsePragmas is used by getFunctionInfo to parse function pragmas such as

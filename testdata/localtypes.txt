@@ -61,3 +61,9 @@ ok: aliasMethod[float32] rejects [float64]
 ok: aliasMethod[float64] rejects [float32]
 ok: closureHolder[Item#1] closure
 ok: closureHolder[Item#2] closure
+ok: promotedA *T.ID
+ok: promotedB *T.ID
+ok: promotedA T.ID
+ok: promotedB T.ID
+ok: promotedA bound and thunk
+ok: promotedB bound and thunk
