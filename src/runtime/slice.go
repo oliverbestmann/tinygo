@@ -14,7 +14,9 @@ func sliceAppend(srcBuf, elemsBuf unsafe.Pointer, srcLen, srcCap, elemsLen, elem
 	if elemsLen > 0 {
 		// Allocate a new slice with capacity for elemsLen more elements, if necessary;
 		// otherwise, reuse the passed slice.
-		srcBuf, _, srcCap = sliceGrow(srcBuf, srcLen, srcCap, newLen, elemSize, layout)
+		if newLen > srcCap {
+			srcBuf, _, srcCap = sliceGrow(srcBuf, srcLen, srcCap, newLen, elemSize, layout)
+		}
 
 		// Append the new elements in-place.
 		memmove(unsafe.Add(srcBuf, srcLen*elemSize), elemsBuf, elemsLen*elemSize)
@@ -24,6 +26,11 @@ func sliceAppend(srcBuf, elemsBuf unsafe.Pointer, srcLen, srcCap, elemsLen, elem
 }
 
 // sliceGrow returns a new slice with space for at least newCap elements
+//
+// Not inlined so that the fast path of sliceAppend stays small enough to be
+// inlined, which turns its memmove into a copy of constant length.
+//
+//go:noinline
 func sliceGrow(oldBuf unsafe.Pointer, oldLen, oldCap, newCap, elemSize uintptr, layout unsafe.Pointer) (unsafe.Pointer, uintptr, uintptr) {
 	if oldCap >= newCap {
 		// No need to grow, return the input slice.
