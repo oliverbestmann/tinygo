@@ -36,6 +36,7 @@ type Options struct {
 	GC                      string
 	PanicStrategy           string
 	PanicUnwind             string
+	FatalRuntimeErrors      bool // runtime errors abort instead of starting a recoverable panic
 	Scheduler               string
 	StackSize               uint64 // goroutine stack size (if none could be automatically determined)
 	Serial                  string

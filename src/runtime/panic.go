@@ -127,7 +127,7 @@ func runtimePanicAt(addr unsafe.Pointer, err Error) {
 	}
 	// Use the normal panic mechanism so that this runtime error
 	// can be recovered with recover().
-	if startPanicUnwind(err, panicTrue) {
+	if !fatalRuntimeErrors && startPanicUnwind(err, panicTrue) {
 		return
 	}
 	printstring("panic: ")

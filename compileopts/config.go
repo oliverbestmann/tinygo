@@ -150,6 +150,9 @@ func (c *Config) BuildTags() []string {
 	default:
 		tags = append(tags, "tinygo.unicore")
 	}
+	if c.Options.FatalRuntimeErrors {
+		tags = append(tags, "tinygo.fatalruntimeerrors")
+	}
 	for i := 1; i <= c.GoMinorVersion; i++ {
 		tags = append(tags, fmt.Sprintf("go1.%d", i))
 	}

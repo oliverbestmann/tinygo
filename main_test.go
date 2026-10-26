@@ -1602,6 +1602,41 @@ func TestGoexitCrash(t *testing.T) {
 	}
 }
 
+func TestFatalRuntimeErrors(t *testing.T) {
+	t.Parallel()
+
+	options := optionsFromTarget("wasip1", sema)
+	options.FatalRuntimeErrors = true
+	config, err := builder.NewConfig(&options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := builder.Build("testdata/fatal-runtime-errors.go", ".wasm", t.TempDir(), config)
+	if err != nil {
+		t.Fatal("failed to build binary:", err)
+	}
+	data, err := os.ReadFile(result.Binary)
+	if err != nil {
+		t.Fatal("failed to read binary:", err)
+	}
+
+	output := &bytes.Buffer{}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	r := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfigInterpreter())
+	defer r.Close(ctx)
+	wasi_snapshot_preview1.MustInstantiate(ctx, r)
+	moduleConfig := wazero.NewModuleConfig().WithStdout(output).WithStderr(output)
+	_, err = r.InstantiateWithConfig(ctx, data, moduleConfig)
+	if err == nil {
+		t.Fatal("program unexpectedly exited successfully")
+	}
+	want := "recovered: explicit\npanic: runtime error: index out of range"
+	if !strings.HasPrefix(output.String(), want) {
+		t.Fatalf("output does not start with %q:\n%s", want, output.String())
+	}
+}
+
 func TestWASIPanicTraceback(t *testing.T) {
 	t.Parallel()
 

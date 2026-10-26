@@ -1781,6 +1781,7 @@ func main() {
 	gc := flag.String("gc", "", "garbage collector to use (none, leaking, conservative, custom, precise, boehm)")
 	panicStrategy := flag.String("panic", "print", "panic strategy (print, trap)")
 	panicUnwind := flag.String("panic-unwind", "", "panic unwind strategy (auto, explicit, none)")
+	fatalRuntimeErrors := flag.Bool("fatal-runtime-errors", false, "abort on runtime errors such as index out of range instead of starting a recoverable panic")
 	scheduler := flag.String("scheduler", "", "which scheduler to use (none, tasks, cores, threads, asyncify)")
 	serial := flag.String("serial", "", "which serial output to use (none, uart, usb, rtt)")
 	work := flag.Bool("work", false, "print the name of the temporary build directory and do not delete this directory on exit")
@@ -1935,6 +1936,7 @@ func main() {
 		GC:                      *gc,
 		PanicStrategy:           *panicStrategy,
 		PanicUnwind:             *panicUnwind,
+		FatalRuntimeErrors:      *fatalRuntimeErrors,
 		Scheduler:               *scheduler,
 		Serial:                  *serial,
 		Work:                    *work,
