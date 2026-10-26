@@ -25,12 +25,7 @@ func stringEqual(x, y string) bool {
 	if len(x) != len(y) {
 		return false
 	}
-	for i := 0; i < len(x); i++ {
-		if x[i] != y[i] {
-			return false
-		}
-	}
-	return true
+	return memequal(unsafe.Pointer(unsafe.StringData(x)), unsafe.Pointer(unsafe.StringData(y)), uintptr(len(x)))
 }
 
 // Return true iff x < y.

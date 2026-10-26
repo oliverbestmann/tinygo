@@ -78,10 +78,23 @@ func exportedFuncPtr(fn func()) uintptr
 
 // Compare two same-size buffers for equality.
 func memequal(x, y unsafe.Pointer, n uintptr) bool {
-	for i := uintptr(0); i < n; i++ {
-		cx := *(*uint8)(unsafe.Add(x, i))
-		cy := *(*uint8)(unsafe.Add(y, i))
-		if cx != cy {
+	const wordSize = unsafe.Sizeof(uint64(0))
+	i := uintptr(0)
+	// Compare whole words when both buffers can be aligned at the same time.
+	if (uintptr(x)^uintptr(y))&(wordSize-1) == 0 {
+		for ; i < n && (uintptr(x)+i)&(wordSize-1) != 0; i++ {
+			if *(*uint8)(unsafe.Add(x, i)) != *(*uint8)(unsafe.Add(y, i)) {
+				return false
+			}
+		}
+		for ; n-i >= wordSize; i += wordSize {
+			if *(*uint64)(unsafe.Add(x, i)) != *(*uint64)(unsafe.Add(y, i)) {
+				return false
+			}
+		}
+	}
+	for ; i < n; i++ {
+		if *(*uint8)(unsafe.Add(x, i)) != *(*uint8)(unsafe.Add(y, i)) {
 			return false
 		}
 	}

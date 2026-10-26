@@ -582,5 +582,43 @@ func main() {
 	testByteSliceStringOrder(">=", greaterEqualByteStrings, escapeGreaterEqualByteString,
 		mutateGreaterEqualByteString, namedGreaterEqualByteStrings)
 	testMixedByteStringComparisons()
+	testStringEqualLengths()
 	var _ = len([]byte(myString("foobar"))) // issue 1246
+}
+
+// Equality with many lengths, alignments and positions of a differing byte.
+func testStringEqualLengths() {
+	var a, b [700]byte
+	for i := range a {
+		a[i] = byte(i * 7)
+		b[i] = a[i]
+	}
+	for n := 0; n <= 600; n++ {
+		if n > 80 && n%61 != 0 && n != 256 && n != 257 && n != 512 {
+			continue
+		}
+		for _, off := range [][2]int{{0, 0}, {3, 3}, {8, 8}, {1, 2}, {5, 0}} {
+			x, y := a[off[0]:off[0]+n], b[off[0]:off[0]+n]
+			if off[0] != off[1] {
+				// Same content at a different alignment.
+				copy(b[off[1]:], a[off[0]:off[0]+n])
+				y = b[off[1] : off[1]+n]
+			}
+			if string(x) != string(y) {
+				println("string equal failed:", n, off[0], off[1])
+				return
+			}
+			for pos := 0; pos < n; pos++ {
+				y[pos] ^= 0x10
+				equal := string(x) == string(y)
+				y[pos] ^= 0x10
+				if equal {
+					println("string differ failed:", n, off[0], off[1], pos)
+					return
+				}
+			}
+			copy(b[:], a[:])
+		}
+	}
+	println("string equal lengths: ok")
 }
