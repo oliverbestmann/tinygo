@@ -1049,7 +1049,8 @@ func Build(pkgName, outpath, tmpdir string, config *compileopts.Config) (BuildRe
 				var args []string
 
 				if config.Scheduler() == "asyncify" {
-					args = append(args, "--asyncify")
+					// Only the asyncify.* imports unwind. Host imports never do.
+					args = append(args, "--asyncify", "--pass-arg=asyncify-ignore-imports")
 				}
 
 				inputFile := result.Binary
