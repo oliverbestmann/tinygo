@@ -35,3 +35,4 @@ b[low:high:cap+1] true
 b[low:max:high] true
 b[-1:] true
 b[:-1] true
+small copies: ok

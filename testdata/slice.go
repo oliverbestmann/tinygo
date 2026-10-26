@@ -170,6 +170,7 @@ func main() {
 
 	testRangeLoops()
 	testSliceBounds()
+	testSmallCopies()
 }
 
 // Range loops evaluate the slice once and keep their own copy of the index.
@@ -325,4 +326,38 @@ func storeAddNil(p *int) int {
 func loadAddNil(p *int) int {
 	*p = 7
 	return *(*int)(unsafe.Add(nil, uintptr(unsafe.Pointer(p))))
+}
+
+// Copies and clears with a runtime length, including overlapping buffers.
+func testSmallCopies() {
+	var buf [56]byte
+	for n := 0; n <= 40; n++ {
+		for shift := -3; shift <= 3; shift++ {
+			for _, isClear := range []bool{false, true} {
+				for j := range buf {
+					buf[j] = byte(j + 1)
+				}
+				start := 8 + shift
+				if isClear {
+					clear(buf[start : start+n])
+				} else {
+					copy(buf[start:start+n], buf[8:8+n])
+				}
+				for j := range buf {
+					want := byte(j + 1)
+					if j >= start && j < start+n {
+						want = 0
+						if !isClear {
+							want = byte(8 + j - start + 1)
+						}
+					}
+					if buf[j] != want {
+						println("small copy failed:", n, shift, isClear, j)
+						return
+					}
+				}
+			}
+		}
+	}
+	println("small copies: ok")
 }

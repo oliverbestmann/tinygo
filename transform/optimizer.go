@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"go/token"
 	"os"
+	"slices"
+	"strings"
 
 	"github.com/tinygo-org/tinygo/compileopts"
 	"github.com/tinygo-org/tinygo/compiler/ircheck"
@@ -185,6 +187,10 @@ func Optimize(mod llvm.Module, config *compileopts.Config) []error {
 		if err := mod.RunPasses("globaldce", llvm.TargetMachine{}, cleanupOptions); err != nil {
 			return []error{fmt.Errorf("could not run final globaldce pass: %w", err)}
 		}
+	}
+
+	if speedLevel > 0 && config.GOARCH() == "wasm" && slices.Contains(strings.Split(config.Features(), ","), "+bulk-memory") {
+		OptimizeWasmBulkMemory(mod)
 	}
 
 	if config.Scheduler() == "none" {
