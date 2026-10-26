@@ -949,8 +949,11 @@ func (c *compilerContext) createPackage(irbuilder llvm.Builder, pkg *ssa.Package
 			for _, method := range methods {
 				// Parse this method.
 				fn := pkg.Prog.MethodValue(method)
-				if fn == nil {
-					continue // probably a generic method
+				if fn == nil || fn.TypeParams().Len() != 0 {
+					// Generic method, only its instantiations are compiled.
+					// MethodValue returns the generic origin for methods with
+					// their own type parameters (Go 1.27).
+					continue
 				}
 				if member.Type().String() != member.String() {
 					// This is a member on a type alias. Do not build such a
