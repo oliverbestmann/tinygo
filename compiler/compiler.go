@@ -1418,6 +1418,10 @@ func (b *builder) createFunctionStart(intrinsic bool) {
 // diagnostic.
 func (b *builder) createFunction() {
 	b.createFunctionStart(false)
+	if b.blockInfo == nil {
+		// createFunctionStart reported an error (the function is redeclared).
+		return
+	}
 
 	// Fill blocks with instructions.
 	b.loweringBody = true
