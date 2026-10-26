@@ -26,6 +26,11 @@ import (
 // src/internal/reflectlite/type.go.
 const numMethodHasMethodSet = 0x8000
 
+// Flag in the numOut field (uint16) of Func type descriptors, set when the
+// function is variadic. Must match the constant in
+// src/internal/reflectlite/type.go.
+const funcFlagVariadic = 0x8000
+
 func reflectTypeName(typ *types.Named) string {
 	name := typ.Obj().Name()
 	if typ.TypeArgs().Len() == 0 {
@@ -332,8 +337,10 @@ func (c *compilerContext) getTypeCode(typ types.Type) llvm.Value {
 		case *types.Signature:
 			typeFieldTypes = append(typeFieldTypes,
 				types.NewVar(token.NoPos, nil, "ptrTo", types.Typ[types.UnsafePointer]),
+				types.NewVar(token.NoPos, nil, "numIn", types.Typ[types.Uint16]),
+				types.NewVar(token.NoPos, nil, "numOut", types.Typ[types.Uint16]),
+				types.NewVar(token.NoPos, nil, "params", types.NewArray(types.Typ[types.UnsafePointer], int64(typ.Params().Len()+typ.Results().Len()))),
 			)
-			// TODO: signature params and return values
 		}
 		if hasMethodSet {
 			// This method set is appended at the start of the struct. It is
@@ -527,8 +534,23 @@ func (c *compilerContext) getTypeCode(typ types.Type) llvm.Value {
 				methodSetValue,
 			}
 		case *types.Signature:
-			typeFields = []llvm.Value{c.getTypeCode(types.NewPointer(typ))}
-			// TODO: params, return values, etc
+			numOut := uint64(typ.Results().Len())
+			if typ.Variadic() {
+				numOut |= funcFlagVariadic
+			}
+			// Parameter types followed by result types.
+			var params []llvm.Value
+			for _, tuple := range []*types.Tuple{typ.Params(), typ.Results()} {
+				for i := range tuple.Len() {
+					params = append(params, c.getTypeCode(tuple.At(i).Type()))
+				}
+			}
+			typeFields = []llvm.Value{
+				c.getTypeCode(types.NewPointer(typ)),                                // ptrTo
+				llvm.ConstInt(c.ctx.Int16Type(), uint64(typ.Params().Len()), false), // numIn
+				llvm.ConstInt(c.ctx.Int16Type(), numOut, false),                     // numOut
+				llvm.ConstArray(c.dataPtrType, params),                              // params
+			}
 		}
 		// Prepend the common RawType field.
 		typeFields = append([]llvm.Value{
@@ -752,6 +774,10 @@ func (c *compilerContext) getTypeCodeName(t types.Type) (name string, isLocal bo
 				isLocal = true
 			}
 			results[i] = s
+		}
+		if t.Variadic() {
+			// Distinguish func(...T) from func([]T).
+			params[len(params)-1] = "..." + params[len(params)-1]
 		}
 		return "func:" + "{" + strings.Join(params, ",") + "}{" + strings.Join(results, ",") + "}", isLocal
 	case *types.Slice:

@@ -3321,6 +3321,8 @@ func TestMethodPkgPath(t *testing.T) {
 	}
 }
 
+*/
+
 func TestVariadicType(t *testing.T) {
 	// Test example from Type documentation.
 	var f func(x int, y ...float64)
@@ -3344,7 +3346,42 @@ func TestVariadicType(t *testing.T) {
 	t.Error(s)
 }
 
-*/
+// TinyGo: not in upstream.
+func TestFuncTypeInOut(t *testing.T) {
+	type namedFunc func(string, []int) (bool, error)
+	typ := TypeOf(namedFunc(nil))
+	if typ.NumIn() != 2 || typ.In(0) != TypeOf("") || typ.In(1) != TypeOf([]int(nil)) {
+		t.Errorf("unexpected inputs for %v", typ)
+	}
+	if typ.NumOut() != 2 || typ.Out(0) != TypeOf(false) || typ.Out(1) != TypeFor[error]() {
+		t.Errorf("unexpected outputs for %v", typ)
+	}
+	if typ.IsVariadic() {
+		t.Errorf("%v must not be variadic", typ)
+	}
+
+	variadic := TypeOf(func(...int) {})
+	if !variadic.IsVariadic() || variadic.NumOut() != 0 {
+		t.Errorf("unexpected variadic func type %v", variadic)
+	}
+	if variadic == TypeOf(func([]int) {}) {
+		t.Errorf("func(...int) and func([]int) must be different types")
+	}
+
+	for _, tt := range []struct {
+		typ  Type
+		want string
+	}{
+		{TypeOf(func() {}), "func()"},
+		{TypeOf(func(int) string { return "" }), "func(int) string"},
+		{TypeOf(func(int, ...string) (bool, error) { return false, nil }), "func(int, ...string) (bool, error)"},
+		{TypeOf((func(string, []int) (bool, error))(nil)), "func(string, []int) (bool, error)"},
+	} {
+		if got := tt.typ.String(); got != tt.want {
+			t.Errorf("String() = %q, want %q", got, tt.want)
+		}
+	}
+}
 
 /*
 

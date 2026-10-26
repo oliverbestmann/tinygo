@@ -161,6 +161,10 @@ const (
 // indicating that an inline method set is present in the type descriptor.
 const numMethodHasMethodSet = 0x8000
 
+// Flag in the numOut field of funcType, set when the function is variadic.
+// Must match the constant in compiler/interface.go.
+const funcFlagVariadic = 0x8000
+
 // The base type struct. All type structs start with this.
 type RawType struct {
 	meta uint8 // metadata byte, contains kind and flags (see constants above)
@@ -196,6 +200,17 @@ type interfaceType struct {
 	RawType
 	ptrTo   *RawType
 	methods methodSet
+}
+
+// funcType is the type descriptor for func types. The params array isn't
+// necessarily 1 element long: it holds numIn parameter types followed by the
+// result types.
+type funcType struct {
+	RawType
+	ptrTo  *RawType
+	numIn  uint16
+	numOut uint16 // bit 15 (funcFlagVariadic) is set for variadic functions
+	params [1]*RawType
 }
 
 type arrayType struct {
@@ -388,6 +403,37 @@ func (t *RawType) String() string {
 			}
 		}
 		s += " }"
+		return s
+	case Func:
+		ft := (*funcType)(unsafe.Pointer(t))
+		types := ft.types()
+		s := "func("
+		for i, in := range types[:ft.numIn] {
+			if i > 0 {
+				s += ", "
+			}
+			if i == int(ft.numIn)-1 && ft.numOut&funcFlagVariadic != 0 {
+				s += "..." + in.elem().String()
+			} else {
+				s += in.String()
+			}
+		}
+		s += ")"
+		out := types[ft.numIn:]
+		if len(out) == 1 {
+			return s + " " + out[0].String()
+		}
+		for i, o := range out {
+			if i == 0 {
+				s += " ("
+			} else {
+				s += ", "
+			}
+			s += o.String()
+		}
+		if len(out) > 1 {
+			s += ")"
+		}
 		return s
 	case Interface:
 		// TODO(dgryski): Needs actual method set info
@@ -1078,6 +1124,47 @@ func (t *RawType) Name() string {
 
 func (t *RawType) Key() Type {
 	return t.key()
+}
+
+func (t *RawType) funcDescriptor(method string) *funcType {
+	underlying := t.underlying()
+	if underlying.Kind() != Func {
+		panic(&TypeError{method})
+	}
+	return (*funcType)(unsafe.Pointer(underlying))
+}
+
+// types returns the parameter types followed by the result types.
+func (t *funcType) types() []*RawType {
+	return unsafe.Slice(&t.params[0], int(t.numIn)+int(t.numOut&^funcFlagVariadic))
+}
+
+// NumIn returns the number of input parameters of a func type.
+func (t *RawType) NumIn() int {
+	return int(t.funcDescriptor("NumIn").numIn)
+}
+
+// NumOut returns the number of output parameters of a func type.
+func (t *RawType) NumOut() int {
+	return int(t.funcDescriptor("NumOut").numOut &^ funcFlagVariadic)
+}
+
+// In returns the type of the i'th input parameter of a func type.
+func (t *RawType) In(i int) Type {
+	ft := t.funcDescriptor("In")
+	return ft.types()[:ft.numIn][i]
+}
+
+// Out returns the type of the i'th output parameter of a func type.
+func (t *RawType) Out(i int) Type {
+	ft := t.funcDescriptor("Out")
+	return ft.types()[ft.numIn:][i]
+}
+
+// IsVariadic reports whether the final input parameter of a func type is a
+// "..." parameter.
+func (t *RawType) IsVariadic() bool {
+	return t.funcDescriptor("IsVariadic").numOut&funcFlagVariadic != 0
 }
 
 // OverflowComplex reports whether the complex128 x cannot be represented by type t.
