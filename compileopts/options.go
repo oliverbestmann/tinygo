@@ -16,7 +16,7 @@ var (
 	validPrintSizeOptions     = []string{"none", "short", "full", "html"}
 	validPanicStrategyOptions = []string{"print", "trap"}
 	validPanicUnwindOptions   = []string{"auto", "explicit", "none"}
-	validOptOptions           = []string{"none", "0", "1", "2", "s", "z"}
+	validOptOptions           = []string{"none", "0", "1", "2", "3", "s", "z"}
 	validBuildVCSOptions      = []string{"auto", "true", "false"}
 )
 

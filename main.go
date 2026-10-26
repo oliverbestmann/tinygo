@@ -1777,7 +1777,7 @@ func main() {
 	}
 	command := os.Args[1]
 
-	opt := flag.String("opt", "z", "optimization level: 0, 1, 2, s, z")
+	opt := flag.String("opt", "z", "optimization level: 0, 1, 2, 3, s, z")
 	gc := flag.String("gc", "", "garbage collector to use (none, leaking, conservative, custom, precise, boehm)")
 	panicStrategy := flag.String("panic", "print", "panic strategy (print, trap)")
 	panicUnwind := flag.String("panic-unwind", "", "panic unwind strategy (auto, explicit, none)")

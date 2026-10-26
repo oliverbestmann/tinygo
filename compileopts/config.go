@@ -205,7 +205,7 @@ func (c *Config) Serial() string {
 	return "none"
 }
 
-// OptLevels returns the optimization level (0-2), size level (0-2), and inliner
+// OptLevels returns the optimization level (0-3), size level (0-2), and inliner
 // threshold as used in the LLVM optimization pipeline.
 func (c *Config) OptLevel() (level string, speedLevel, sizeLevel int) {
 	switch c.Options.Opt {
@@ -215,6 +215,8 @@ func (c *Config) OptLevel() (level string, speedLevel, sizeLevel int) {
 		return "O1", 1, 0
 	case "2":
 		return "O2", 2, 0
+	case "3":
+		return "O3", 3, 0
 	case "s":
 		return "Os", 2, 1
 	case "z":
