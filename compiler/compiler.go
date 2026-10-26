@@ -1628,6 +1628,11 @@ func (b *builder) createInstruction(instr ssa.Instruction) {
 		mapType := instr.Map.Type().Underlying().(*types.Map)
 		b.createMapUpdate(mapType.Key(), m, instr.Key, instr.Value, instr.Pos())
 	case *ssa.Panic:
+		if fn := rangeFuncPanic(instr); fn != "" {
+			b.createRuntimeInvoke(fn, nil, "")
+			b.createUnwindReturnOrUnreachable()
+			break
+		}
 		value := b.getValue(instr.X, getPos(instr))
 		b.createRuntimeInvoke("_panic", []llvm.Value{value}, "")
 		b.createUnwindReturnOrUnreachable()

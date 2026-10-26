@@ -284,6 +284,16 @@ func divideByZeroPanic() {
 	runtimePanicAt(returnAddress(0), errDivideByZero)
 }
 
+// Panic when a range-over-func iterator calls yield after the loop exited.
+func rangeExitPanic() {
+	runtimePanicAt(returnAddress(0), errRangeExit)
+}
+
+// Panic when a range-over-func iterator recovered a panic of the loop body.
+func rangeMissingPanicPanic() {
+	runtimePanicAt(returnAddress(0), errRangeMissingPanic)
+}
+
 func blockingPanic() {
 	runtimePanicAt(returnAddress(0), errBlockingExported)
 }

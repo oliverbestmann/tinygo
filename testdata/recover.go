@@ -344,6 +344,17 @@ func recoverRuntimeErrorMessages() {
 		var right interface{} = []int{1}
 		_ = left == right
 	})
+	recoverRuntimeErrorValue(func() {
+		for range yieldAfterExit {
+			break
+		}
+	})
+}
+
+// An iterator that ignores the result of yield.
+func yieldAfterExit(yield func() bool) {
+	yield()
+	yield()
 }
 
 //go:noinline

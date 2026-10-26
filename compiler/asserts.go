@@ -5,6 +5,7 @@ package compiler
 
 import (
 	"fmt"
+	"go/constant"
 	"go/token"
 	"go/types"
 
@@ -296,4 +297,28 @@ func (b *builder) extendInteger(value llvm.Value, valueType types.Type, targetTy
 		}
 	}
 	return value
+}
+
+// rangeFuncPanic returns the runtime function for a state check panic that
+// go/ssa emits in range-over-func loops, or "" for any other panic. Go reports
+// these as runtime errors (see runtime.panicrangestate).
+func rangeFuncPanic(instr *ssa.Panic) string {
+	if instr.Pos() != token.NoPos {
+		return ""
+	}
+	mi, ok := instr.X.(*ssa.MakeInterface)
+	if !ok {
+		return ""
+	}
+	c, ok := mi.X.(*ssa.Const)
+	if !ok || c.Value == nil || c.Value.Kind() != constant.String {
+		return ""
+	}
+	switch constant.StringVal(c.Value) {
+	case "yield function called after range loop exit":
+		return "rangeExitPanic"
+	case "iterator call did not preserve panic":
+		return "rangeMissingPanicPanic"
+	}
+	return ""
 }

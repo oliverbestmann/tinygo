@@ -64,6 +64,7 @@ outer recovered: repanic value
   recovered runtime error: runtime error: unsafe.Slice/String: len out of range
   recovered runtime error: runtime error: negative shift
   recovered runtime error: runtime error: comparing un-comparable type
+  recovered runtime error: runtime error: yield function called after range loop exit
 
 # recover from nil map and closed channel
   recovered: nil map

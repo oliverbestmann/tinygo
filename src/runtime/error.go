@@ -25,6 +25,8 @@ const (
 	errChannelTooBig       = plainError("new channel is too big")
 	errNegativeShift       = plainError(runtimeErrorPrefix + "negative shift")
 	errDivideByZero        = plainError(runtimeErrorPrefix + "integer divide by zero")
+	errRangeExit           = plainError(runtimeErrorPrefix + "yield function called after range loop exit")
+	errRangeMissingPanic   = plainError(runtimeErrorPrefix + "iterator call did not preserve panic")
 	errBlockingExported    = plainError("trying to do blocking operation in exported function")
 	errTimersUnsupported   = plainError("timers not supported without a scheduler")
 	errIntegerOverflow     = plainError(runtimeErrorPrefix + "integer overflow")
