@@ -368,6 +368,12 @@ func (c *compilerContext) getFunctionInfo(f *ssa.Function) functionInfo {
 
 func (c *compilerContext) canonicalFunctionName(f *ssa.Function) string {
 	typeArgs := f.TypeArgs()
+	if parent := f.Parent(); parent != nil && len(typeArgs) == 0 {
+		// Anonymous function, named like "parent$1". Use the canonical name of
+		// the parent so that closures of instances with different (but
+		// same-named) local type arguments get different names.
+		return c.canonicalFunctionName(parent) + f.Name()[len(parent.Name()):]
+	}
 	if len(typeArgs) == 0 {
 		return f.RelString(nil)
 	}

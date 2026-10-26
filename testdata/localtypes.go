@@ -405,4 +405,22 @@ func main() {
 	expect("aliasMethod[float64] accepts own", aliasMethodCheck64(aliasMethod64))
 	expect("aliasMethod[float32] rejects [float64]", !aliasMethodCheck32(aliasMethod64))
 	expect("aliasMethod[float64] rejects [float32]", !aliasMethodCheck64(aliasMethod32))
+
+	// Closures in instances with same-named local type arguments.
+	expect("closureHolder[Item#1] closure", closureInstA() == 1)
+	expect("closureHolder[Item#2] closure", closureInstB() == 2)
+}
+
+type closureHolder[T any] struct{ v T }
+
+func (h closureHolder[T]) get() func() T { return func() T { return h.v } }
+
+func closureInstA() int {
+	type Item struct{ A int }
+	return closureHolder[Item]{Item{1}}.get()().A
+}
+
+func closureInstB() int {
+	type Item struct{ B, C int }
+	return closureHolder[Item]{Item{2, 3}}.get()().B
 }
