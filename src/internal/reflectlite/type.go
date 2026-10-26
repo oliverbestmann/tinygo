@@ -179,9 +179,10 @@ type basicType struct {
 // pointer because it doesn't have ptrTo).
 type elemType struct {
 	RawType
-	numMethod uint16
-	ptrTo     *RawType
-	elem      *RawType
+	numMethod  uint16
+	dispatchID uint32 // interface method dispatch, see transform/interface-lowering.go
+	ptrTo      *RawType
+	elem       *RawType
 }
 
 // ptrType is the type descriptor for pointer types.
@@ -191,9 +192,10 @@ type elemType struct {
 // actual type descriptor and must not be accessed.
 type ptrType struct {
 	RawType
-	numMethod uint16
-	elem      *RawType
-	methods   methodSet // only present when numMethod & numMethodHasMethodSet != 0
+	numMethod  uint16
+	dispatchID uint32 // interface method dispatch, see transform/interface-lowering.go
+	elem       *RawType
+	methods    methodSet // only present when numMethod & numMethodHasMethodSet != 0
 }
 
 type interfaceType struct {
@@ -209,28 +211,30 @@ type funcType struct {
 	RawType
 	ptrTo  *RawType
 	numIn  uint16
-	numOut uint16 // bit 15 (funcFlagVariadic) is set for variadic functions
+	numOut uint16         // bit 15 (funcFlagVariadic) is set for variadic functions
 	call   unsafe.Pointer // stub used by Value.Call, see compiler/reflectcall.go
 	params [1]*RawType
 }
 
 type arrayType struct {
 	RawType
-	numMethod uint16
-	ptrTo     *RawType
-	elem      *RawType
-	arrayLen  uintptr
-	slicePtr  *RawType
-	layout    unsafe.Pointer
+	numMethod  uint16
+	dispatchID uint32 // interface method dispatch, see transform/interface-lowering.go
+	ptrTo      *RawType
+	elem       *RawType
+	arrayLen   uintptr
+	slicePtr   *RawType
+	layout     unsafe.Pointer
 }
 
 type mapType struct {
 	RawType
-	numMethod uint16
-	ptrTo     *RawType
-	elem      *RawType
-	key       *RawType
-	typeInfo  unsafe.Pointer
+	numMethod  uint16
+	dispatchID uint32 // interface method dispatch, see transform/interface-lowering.go
+	ptrTo      *RawType
+	elem       *RawType
+	key        *RawType
+	typeInfo   unsafe.Pointer
 }
 
 // namedType is the type descriptor for named types. The numMethod field uses
@@ -240,18 +244,18 @@ type mapType struct {
 // set's entries. When clear, the name string starts directly at that offset.
 type namedType struct {
 	RawType
-	numMethod uint16
-	ptrTo     *RawType
-	elem      *RawType
-	pkg       *byte
+	numMethod  uint16
+	dispatchID uint32 // interface method dispatch, see transform/interface-lowering.go
+	ptrTo      *RawType
+	elem       *RawType
+	pkg        *byte
 	// if numMethod & numMethodHasMethodSet != 0: methodSet follows here
 	// name (null-terminated "pkg.Name\0") follows after the method set (or directly here)
 }
 
 // Type for struct types. The numField value is intentionally put before ptrTo
 // for better struct packing on 32-bit and 64-bit architectures. On these
-// architectures, the ptrTo field still has the same offset as in all the other
-// type structs.
+// architectures, the ptrTo field still has the same offset as in elemType.
 // The fields array isn't necessarily 1 structField long, instead it is as long
 // as numFields. The array is given a length of 1 to satisfy the Go type
 // checker.
@@ -261,13 +265,14 @@ type namedType struct {
 // and the type descriptor ends after the last structField entry.
 type structType struct {
 	RawType
-	numMethod uint16
-	ptrTo     *RawType
-	pkgpath   *byte
-	size      uint32
-	numField  uint16
-	layout    unsafe.Pointer
-	fields    [1]structField // the remaining fields are all of type structField
+	numMethod  uint16
+	dispatchID uint32 // interface method dispatch, see transform/interface-lowering.go
+	ptrTo      *RawType
+	pkgpath    *byte
+	size       uint32
+	numField   uint16
+	layout     unsafe.Pointer
+	fields     [1]structField // the remaining fields are all of type structField
 	// methods methodSet follows after fields, only when numMethod & numMethodHasMethodSet != 0
 }
 

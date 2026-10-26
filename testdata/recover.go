@@ -291,6 +291,10 @@ func recoverRuntimeError() {
 		_ = x.(string)
 	})
 	recoverEmptyInterfaceTypeAssert()
+	recoverMustPanic("nil interface method", func() {
+		var err error
+		_ = err.Error()
+	})
 	recoverMustPanic("interface compare", func() {
 		var x interface{} = []int{}
 		_ = x == x

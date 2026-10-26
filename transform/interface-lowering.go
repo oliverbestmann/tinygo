@@ -22,7 +22,8 @@ package transform
 // interface invoke:
 //     These functions are defined with a similar type switch, but instead of
 //     checking for the appropriate type, these functions will call the
-//     underlying method instead.
+//     underlying method instead. Interfaces with many implementations switch
+//     on the dispatchID field of the type descriptor.
 //
 // Note that this way of implementing interfaces is very different from how the
 // main Go compiler implements them. For more details on how the main Go
@@ -42,6 +43,10 @@ import (
 // is present in the type descriptor. Must match the constant in
 // src/internal/reflectlite/type.go.
 const numMethodHasMethodSet = 0x8000
+
+// minSwitchDispatchTypes is the number of implementing types from which an
+// invoke thunk switches on a dispatch ID instead of comparing each type code.
+const minSwitchDispatchTypes = 5
 
 // signatureInfo is a Go signature of an interface method. It does not represent
 // any method in particular.
@@ -65,6 +70,7 @@ type typeInfo struct {
 	typecodeGEP llvm.Value
 	methodSet   llvm.Value
 	methods     []*methodInfo
+	dispatchID  uint64 // 0 if not used for dispatch
 }
 
 // getMethod looks up the method on this type with the given signature and
@@ -294,6 +300,32 @@ func (p *lowerInterfacesPass) run() error {
 		return abiErrors
 	}
 
+	// Create a sorted list of type names, for predictable iteration.
+	var typeNames []string
+	for name := range p.types {
+		typeNames = append(typeNames, name)
+	}
+	sort.Strings(typeNames)
+
+	// Assign dispatch IDs to all types of interfaces whose invoke thunks will
+	// switch on them.
+	for _, fn := range interfaceInvokeFunctions {
+		itf := p.interfaces[fn.GetStringAttributeAtIndex(-1, "tinygo-methods").GetStringValue()]
+		if !p.useSwitchDispatch(itf) {
+			continue
+		}
+		for _, t := range itf.types {
+			t.dispatchID = 1
+		}
+	}
+	var nextDispatchID uint64
+	for _, name := range typeNames {
+		if t := p.types[name]; t.dispatchID != 0 {
+			nextDispatchID++
+			t.dispatchID = nextDispatchID
+		}
+	}
+
 	// Define all interface invoke thunks.
 	for _, fn := range interfaceInvokeFunctions {
 		methodsAttr := fn.GetStringAttributeAtIndex(-1, "tinygo-methods")
@@ -348,13 +380,6 @@ func (p *lowerInterfacesPass) run() error {
 		}
 		use.EraseFromParentAsInstruction()
 	}
-
-	// Create a sorted list of type names, for predictable iteration.
-	var typeNames []string
-	for name := range p.types {
-		typeNames = append(typeNames, name)
-	}
-	sort.Strings(typeNames)
 
 	// Check whether runtime.typeImplementsMethodSet still has uses. Now that
 	// interface type assertions have been lowered to type-ID comparison
@@ -439,6 +464,9 @@ func (p *lowerInterfacesPass) run() error {
 					}
 				}
 				newInitializerFields = append(newInitializerFields, field)
+			}
+			if t.dispatchID != 0 {
+				newInitializerFields[2] = llvm.ConstInt(p.ctx.Int32Type(), t.dispatchID, false)
 			}
 			newInitializer := p.ctx.ConstStruct(newInitializerFields, false)
 			typecodeName := t.typecode.Name()
@@ -536,8 +564,7 @@ func (p *lowerInterfacesPass) getSignature(name string) *signatureInfo {
 // of the type that implements this interface.
 //
 // Matching the actual type is implemented using an if/else chain over all
-// possible types.  This is later converted to a switch statement by the LLVM
-// simplifycfg pass.
+// possible types, or a switch on the dispatch ID if there are many types.
 func (p *lowerInterfacesPass) defineInterfaceMethodFunc(fn llvm.Value, itf *interfaceInfo, signature *signatureInfo) {
 	context := fn.LastParam()
 	actualType := llvm.PrevParam(context)
@@ -587,13 +614,34 @@ func (p *lowerInterfacesPass) defineInterfaceMethodFunc(fn llvm.Value, itf *inte
 		p.builder.SetCurrentDebugLocation(0, 0, difunc, llvm.Metadata{})
 	}
 
+	var nilBlock llvm.BasicBlock
+	var sw llvm.Value
+	if p.useSwitchDispatch(itf) {
+		// Check for a nil interface before loading the dispatch ID.
+		nilBlock = p.ctx.AddBasicBlock(fn, "nil")
+		load := p.ctx.AddBasicBlock(fn, "load")
+		isNil := p.builder.CreateICmp(llvm.IntEQ, actualType, llvm.ConstNull(p.ptrType), "isnil")
+		p.builder.CreateCondBr(isNil, nilBlock, load)
+		p.builder.SetInsertPointAtEnd(load)
+		// The dispatchID field follows the kind byte and numMethod.
+		header := p.ctx.StructType([]llvm.Type{p.ctx.Int8Type(), p.ctx.Int16Type(), p.ctx.Int32Type()}, false)
+		idPtr := p.builder.CreateStructGEP(header, actualType, 2, "")
+		id := p.builder.CreateLoad(p.ctx.Int32Type(), idPtr, "dispatchID")
+		sw = p.builder.CreateSwitch(id, nilBlock, len(itf.types))
+	}
+
 	// Define all possible functions that can be called.
 	for _, typ := range itf.types {
-		// Create type check (if/else).
 		bb := p.ctx.AddBasicBlock(fn, typ.name)
-		next := p.ctx.AddBasicBlock(fn, typ.name+".next")
-		cmp := p.builder.CreateICmp(llvm.IntEQ, actualType, typ.typecodeGEP, typ.name+".icmp")
-		p.builder.CreateCondBr(cmp, bb, next)
+		var next llvm.BasicBlock
+		if sw.IsNil() {
+			// Create type check (if/else).
+			next = p.ctx.AddBasicBlock(fn, typ.name+".next")
+			cmp := p.builder.CreateICmp(llvm.IntEQ, actualType, typ.typecodeGEP, typ.name+".icmp")
+			p.builder.CreateCondBr(cmp, bb, next)
+		} else {
+			sw.AddCase(llvm.ConstInt(p.ctx.Int32Type(), typ.dispatchID, false), bb)
+		}
 
 		// The function we will redirect to when the interface has this type.
 		function := typ.getMethod(signature).function
@@ -621,7 +669,12 @@ func (p *lowerInterfacesPass) defineInterfaceMethodFunc(fn llvm.Value, itf *inte
 
 		// Start next comparison in the 'next' block (which is jumped to when
 		// the type doesn't match).
-		p.builder.SetInsertPointAtEnd(next)
+		if sw.IsNil() {
+			p.builder.SetInsertPointAtEnd(next)
+		}
+	}
+	if !sw.IsNil() {
+		p.builder.SetInsertPointAtEnd(nilBlock)
 	}
 
 	// The builder now points to the last *.then block, after all types have
@@ -636,6 +689,22 @@ func (p *lowerInterfacesPass) defineInterfaceMethodFunc(fn llvm.Value, itf *inte
 		llvm.Undef(p.ptrType),
 	}, "")
 	p.builder.CreateUnreachable()
+}
+
+// useSwitchDispatch reports whether invoke thunks of this interface switch on
+// the dispatchID field. All types need that field, which follows numMethod in
+// the type descriptor (after the method set pointer at index 0).
+func (p *lowerInterfacesPass) useSwitchDispatch(itf *interfaceInfo) bool {
+	if len(itf.types) < minSwitchDispatchTypes {
+		return false
+	}
+	for _, t := range itf.types {
+		fields := t.typecode.GlobalValueType().StructElementTypes()
+		if len(fields) < 4 || fields[2] != p.ctx.Int16Type() || fields[3] != p.ctx.Int32Type() {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *lowerInterfacesPass) getDIFile(file string) llvm.Metadata {

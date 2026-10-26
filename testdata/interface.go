@@ -47,6 +47,9 @@ func main() {
 
 	var v Byter = FooByte(3)
 	println("Byte(): ", v.Byte())
+	for _, b := range []Byter{v, GenByte[int8](4), GenByte[int16](5), GenByte[int32](6), GenByte[int64](7)} {
+		println("Byte(): ", b.Byte())
+	}
 
 	var n int
 	var f float32
@@ -341,6 +344,10 @@ type Empty interface{}
 type FooByte int
 
 func (f FooByte) Byte() byte { return byte(f) }
+
+type GenByte[T any] int
+
+func (f GenByte[T]) Byte() byte { return byte(f) }
 
 type Byter interface {
 	Byte() uint8

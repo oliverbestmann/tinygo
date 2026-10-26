@@ -50,6 +50,7 @@ outer recovered: repanic value
   recovered: slice
   recovered: type assert
   recovered: empty interface type assert
+  recovered: nil interface method
   recovered: interface compare
   recovered: map key
   recovered: map lookup key

@@ -263,6 +263,7 @@ func (c *compilerContext) getTypeCode(typ types.Type) llvm.Value {
 			}
 			typeFieldTypes = append(typeFieldTypes,
 				types.NewVar(token.NoPos, nil, "numMethods", types.Typ[types.Uint16]),
+				types.NewVar(token.NoPos, nil, "dispatchID", types.Typ[types.Uint32]),
 				types.NewVar(token.NoPos, nil, "ptrTo", types.Typ[types.UnsafePointer]),
 				types.NewVar(token.NoPos, nil, "underlying", types.Typ[types.UnsafePointer]),
 				types.NewVar(token.NoPos, nil, "pkgpath", types.Typ[types.UnsafePointer]),
@@ -278,18 +279,21 @@ func (c *compilerContext) getTypeCode(typ types.Type) llvm.Value {
 		case *types.Chan:
 			typeFieldTypes = append(typeFieldTypes,
 				types.NewVar(token.NoPos, nil, "numMethods", types.Typ[types.Uint16]), // reuse for select chan direction
+				types.NewVar(token.NoPos, nil, "dispatchID", types.Typ[types.Uint32]),
 				types.NewVar(token.NoPos, nil, "ptrTo", types.Typ[types.UnsafePointer]),
 				types.NewVar(token.NoPos, nil, "elementType", types.Typ[types.UnsafePointer]),
 			)
 		case *types.Slice:
 			typeFieldTypes = append(typeFieldTypes,
 				types.NewVar(token.NoPos, nil, "numMethods", types.Typ[types.Uint16]),
+				types.NewVar(token.NoPos, nil, "dispatchID", types.Typ[types.Uint32]),
 				types.NewVar(token.NoPos, nil, "ptrTo", types.Typ[types.UnsafePointer]),
 				types.NewVar(token.NoPos, nil, "elementType", types.Typ[types.UnsafePointer]),
 			)
 		case *types.Pointer:
 			typeFieldTypes = append(typeFieldTypes,
 				types.NewVar(token.NoPos, nil, "numMethods", types.Typ[types.Uint16]),
+				types.NewVar(token.NoPos, nil, "dispatchID", types.Typ[types.Uint32]),
 				types.NewVar(token.NoPos, nil, "elementType", types.Typ[types.UnsafePointer]),
 			)
 			if len(methods) > 0 {
@@ -300,6 +304,7 @@ func (c *compilerContext) getTypeCode(typ types.Type) llvm.Value {
 		case *types.Array:
 			typeFieldTypes = append(typeFieldTypes,
 				types.NewVar(token.NoPos, nil, "numMethods", types.Typ[types.Uint16]),
+				types.NewVar(token.NoPos, nil, "dispatchID", types.Typ[types.Uint32]),
 				types.NewVar(token.NoPos, nil, "ptrTo", types.Typ[types.UnsafePointer]),
 				types.NewVar(token.NoPos, nil, "elementType", types.Typ[types.UnsafePointer]),
 				types.NewVar(token.NoPos, nil, "length", types.Typ[types.Uintptr]),
@@ -309,6 +314,7 @@ func (c *compilerContext) getTypeCode(typ types.Type) llvm.Value {
 		case *types.Map:
 			typeFieldTypes = append(typeFieldTypes,
 				types.NewVar(token.NoPos, nil, "numMethods", types.Typ[types.Uint16]),
+				types.NewVar(token.NoPos, nil, "dispatchID", types.Typ[types.Uint32]),
 				types.NewVar(token.NoPos, nil, "ptrTo", types.Typ[types.UnsafePointer]),
 				types.NewVar(token.NoPos, nil, "elementType", types.Typ[types.UnsafePointer]),
 				types.NewVar(token.NoPos, nil, "keyType", types.Typ[types.UnsafePointer]),
@@ -317,6 +323,7 @@ func (c *compilerContext) getTypeCode(typ types.Type) llvm.Value {
 		case *types.Struct:
 			typeFieldTypes = append(typeFieldTypes,
 				types.NewVar(token.NoPos, nil, "numMethods", types.Typ[types.Uint16]),
+				types.NewVar(token.NoPos, nil, "dispatchID", types.Typ[types.Uint32]),
 				types.NewVar(token.NoPos, nil, "ptrTo", types.Typ[types.UnsafePointer]),
 				types.NewVar(token.NoPos, nil, "pkgpath", types.Typ[types.UnsafePointer]),
 				types.NewVar(token.NoPos, nil, "size", types.Typ[types.Uint32]),
@@ -391,6 +398,7 @@ func (c *compilerContext) getTypeCode(typ types.Type) llvm.Value {
 			}
 			typeFields = []llvm.Value{
 				llvm.ConstInt(c.ctx.Int16Type(), namedNumMethods, false), // numMethods
+				llvm.ConstInt(c.ctx.Int32Type(), 0, false),               // dispatchID
 				c.getTypeCode(types.NewPointer(typ)),                     // ptrTo
 				c.getTypeCode(typ.Underlying()),                          // underlying
 				pkgPathPtr,                                               // pkgpath pointer
@@ -413,12 +421,14 @@ func (c *compilerContext) getTypeCode(typ types.Type) llvm.Value {
 
 			typeFields = []llvm.Value{
 				llvm.ConstInt(c.ctx.Int16Type(), uint64(dir), false), // actually channel direction
+				llvm.ConstInt(c.ctx.Int32Type(), 0, false),           // dispatchID
 				c.getTypeCode(types.NewPointer(typ)),                 // ptrTo
 				c.getTypeCode(typ.Elem()),                            // elementType
 			}
 		case *types.Slice:
 			typeFields = []llvm.Value{
 				llvm.ConstInt(c.ctx.Int16Type(), 0, false), // numMethods
+				llvm.ConstInt(c.ctx.Int32Type(), 0, false), // dispatchID
 				c.getTypeCode(types.NewPointer(typ)),       // ptrTo
 				c.getTypeCode(typ.Elem()),                  // elementType
 			}
@@ -432,6 +442,7 @@ func (c *compilerContext) getTypeCode(typ types.Type) llvm.Value {
 			}
 			typeFields = []llvm.Value{
 				llvm.ConstInt(c.ctx.Int16Type(), ptrNumMethods, false), // numMethods
+				llvm.ConstInt(c.ctx.Int32Type(), 0, false),             // dispatchID
 				c.getTypeCode(typ.Elem()),
 			}
 			if len(methods) > 0 {
@@ -440,6 +451,7 @@ func (c *compilerContext) getTypeCode(typ types.Type) llvm.Value {
 		case *types.Array:
 			typeFields = []llvm.Value{
 				llvm.ConstInt(c.ctx.Int16Type(), 0, false),             // numMethods
+				llvm.ConstInt(c.ctx.Int32Type(), 0, false),             // dispatchID
 				c.getTypeCode(types.NewPointer(typ)),                   // ptrTo
 				c.getTypeCode(typ.Elem()),                              // elementType
 				llvm.ConstInt(c.uintptrType, uint64(typ.Len()), false), // length
@@ -449,6 +461,7 @@ func (c *compilerContext) getTypeCode(typ types.Type) llvm.Value {
 		case *types.Map:
 			typeFields = []llvm.Value{
 				llvm.ConstInt(c.ctx.Int16Type(), 0, false), // numMethods
+				llvm.ConstInt(c.ctx.Int32Type(), 0, false), // dispatchID
 				c.getTypeCode(types.NewPointer(typ)),       // ptrTo
 				c.getTypeCode(typ.Elem()),                  // elem
 				c.getTypeCode(typ.Key()),                   // key
@@ -474,6 +487,7 @@ func (c *compilerContext) getTypeCode(typ types.Type) llvm.Value {
 			}
 			typeFields = []llvm.Value{
 				llvm.ConstInt(c.ctx.Int16Type(), structNumMethods, false), // numMethods
+				llvm.ConstInt(c.ctx.Int32Type(), 0, false),                // dispatchID
 				c.getTypeCode(types.NewPointer(typ)),                      // ptrTo
 				pkgPathPtr,
 				llvm.ConstInt(c.ctx.Int32Type(), uint64(size), false),            // size
