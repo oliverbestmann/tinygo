@@ -373,13 +373,15 @@ func ptrmaps() {
 	if unsafe.Offsetof(paddedKey{}.B) > 1 {
 		pm := make(map[paddedKey]int)
 		var pk1, pk2 paddedKey
-		pk1.A = 1; pk1.B = 42
-		pk2.A = 1; pk2.B = 42
+		pk1.A = 1
+		pk1.B = 42
+		pk2.A = 1
+		pk2.B = 42
 		// Poison pk2's padding byte (between A and B).
 		*(*byte)(unsafe.Add(unsafe.Pointer(&pk2), 1)) = 0xFF
 		pm[pk1] = 100
-		println("padded key lookup:", pm[pk2])         // 100
-		println("padded key equal:", pk1 == pk2)        // true
+		println("padded key lookup:", pm[pk2])   // 100
+		println("padded key equal:", pk1 == pk2) // true
 	} else {
 		// No padding on this platform; print expected output.
 		println("padded key lookup:", 100)
@@ -397,6 +399,6 @@ func ptrmaps() {
 	bk2.X = "hello"
 	*(*int)(unsafe.Pointer(&bk2)) = 999
 	bm[bk1] = 200
-	println("blank key lookup:", bm[bk2])           // 200
-	println("blank key equal:", bk1 == bk2)          // true
+	println("blank key lookup:", bm[bk2])   // 200
+	println("blank key equal:", bk1 == bk2) // true
 }
