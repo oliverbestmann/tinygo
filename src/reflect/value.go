@@ -207,11 +207,13 @@ func MakeChan(typ Type, buffer int) Value {
 }
 
 func (v Value) Call(in []Value) []Value {
-	panic("unimplemented: (reflect.Value).Call()")
+	out := v.Value.Call(*(*[]reflectlite.Value)(unsafe.Pointer(&in)))
+	return *(*[]Value)(unsafe.Pointer(&out))
 }
 
 func (v Value) CallSlice(in []Value) []Value {
-	panic("unimplemented: (reflect.Value).CallSlice()")
+	out := v.Value.CallSlice(*(*[]reflectlite.Value)(unsafe.Pointer(&in)))
+	return *(*[]Value)(unsafe.Pointer(&out))
 }
 
 func (v Value) Equal(u Value) bool {

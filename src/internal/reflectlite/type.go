@@ -210,6 +210,7 @@ type funcType struct {
 	ptrTo  *RawType
 	numIn  uint16
 	numOut uint16 // bit 15 (funcFlagVariadic) is set for variadic functions
+	call   unsafe.Pointer // stub used by Value.Call, see compiler/reflectcall.go
 	params [1]*RawType
 }
 

@@ -2185,7 +2185,7 @@ func fmtSelect(info []caseInfo) string {
 	return buf.String()
 }
 
-// TODO(tinygo): missing func/method/call support
+*/
 
 type two [2]uintptr
 
@@ -2276,6 +2276,10 @@ func TestCallWithStruct(t *testing.T) {
 		t.Errorf("takesNonEmpty returned %#v", r)
 	}
 }
+
+// TODO(tinygo): finalizers and MakeFunc are not supported
+
+/*
 
 func TestCallReturnsEmpty(t *testing.T) {
 	// Issue 21717: past-the-end pointer write in Call with
@@ -3347,6 +3351,26 @@ func TestVariadicType(t *testing.T) {
 }
 
 // TinyGo: not in upstream.
+func TestCallClosurePanicBlocking(t *testing.T) {
+	n := 10
+	closure := func(x int) int { n += x; return n }
+	if got := ValueOf(closure).Call([]Value{ValueOf(5)})[0].Int(); got != 15 || n != 15 {
+		t.Errorf("closure returned %d (n=%d), want 15", got, n)
+	}
+
+	shouldPanic("boom", func() {
+		ValueOf(func() { panic("boom") }).Call(nil)
+	})
+
+	// The callee blocks, so the scheduler has to switch goroutines.
+	ch := make(chan int)
+	go func() { ch <- 42 }()
+	if got := ValueOf(func() int { return <-ch }).Call(nil)[0].Int(); got != 42 {
+		t.Errorf("blocking call returned %d, want 42", got)
+	}
+}
+
+// TinyGo: not in upstream.
 func TestFuncTypeInOut(t *testing.T) {
 	type namedFunc func(string, []int) (bool, error)
 	typ := TypeOf(namedFunc(nil))
@@ -3776,8 +3800,6 @@ func TestSetLenCap(t *testing.T) {
 	shouldPanic("SetCap", func() { va.SetCap(8) })
 }
 
-/*
-
 func TestVariadic(t *testing.T) {
 	var b strings.Builder
 	V := ValueOf
@@ -3823,8 +3845,6 @@ func TestStructArg(t *testing.T) {
 		t.Errorf("function called with (%v, %v), want (%v, %v)", gotA, gotB, wantA, wantB)
 	}
 }
-
-*/
 
 var tagGetTests = []struct {
 	Tag   StructTag

@@ -339,6 +339,7 @@ func (c *compilerContext) getTypeCode(typ types.Type) llvm.Value {
 				types.NewVar(token.NoPos, nil, "ptrTo", types.Typ[types.UnsafePointer]),
 				types.NewVar(token.NoPos, nil, "numIn", types.Typ[types.Uint16]),
 				types.NewVar(token.NoPos, nil, "numOut", types.Typ[types.Uint16]),
+				types.NewVar(token.NoPos, nil, "call", types.Typ[types.UnsafePointer]),
 				types.NewVar(token.NoPos, nil, "params", types.NewArray(types.Typ[types.UnsafePointer], int64(typ.Params().Len()+typ.Results().Len()))),
 			)
 		}
@@ -549,6 +550,7 @@ func (c *compilerContext) getTypeCode(typ types.Type) llvm.Value {
 				c.getTypeCode(types.NewPointer(typ)),                                // ptrTo
 				llvm.ConstInt(c.ctx.Int16Type(), uint64(typ.Params().Len()), false), // numIn
 				llvm.ConstInt(c.ctx.Int16Type(), numOut, false),                     // numOut
+				c.getReflectCallStub(typ, typeCodeName, isLocal),                    // call
 				llvm.ConstArray(c.dataPtrType, params),                              // params
 			}
 		}

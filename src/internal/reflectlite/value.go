@@ -2387,12 +2387,102 @@ func MakeChan(typ Type, size int) Value {
 	}
 }
 
+// callStub is the type of the call stub in a func type descriptor. See
+// compiler/reflectcall.go.
+type callStub func(fn unsafe.Pointer, args, results *unsafe.Pointer)
+
 func (v Value) Call(in []Value) []Value {
-	panic("unimplemented: (reflect.Value).Call()")
+	return v.call("Call", in, false)
 }
 
 func (v Value) CallSlice(in []Value) []Value {
-	panic("unimplemented: (reflect.Value).CallSlice()")
+	return v.call("CallSlice", in, true)
+}
+
+func (v Value) call(op string, in []Value, isSlice bool) []Value {
+	if v.Kind() != Func {
+		panic(&ValueError{Method: op, Kind: v.Kind()})
+	}
+	if !v.isExported() {
+		panic("reflect: " + op + " using value obtained using unexported field")
+	}
+	if v.IsNil() {
+		panic("reflect: call of nil function")
+	}
+	t := v.typecode
+	ft := t.funcDescriptor(op)
+	if ft.call == nil {
+		panic("unimplemented: (reflect.Value)." + op + "() on this target")
+	}
+
+	numIn := int(ft.numIn)
+	switch {
+	case isSlice:
+		if !t.IsVariadic() {
+			panic("reflect: CallSlice of non-variadic function")
+		}
+		if len(in) != numIn {
+			panic("reflect: CallSlice with wrong number of input arguments")
+		}
+	case t.IsVariadic():
+		if len(in) < numIn-1 {
+			panic("reflect: Call with too few input arguments")
+		}
+		// Pack the variadic arguments into a slice.
+		extra := in[numIn-1:]
+		slice := MakeSlice(t.In(numIn-1), len(extra), len(extra))
+		for i, x := range extra {
+			slice.Index(i).Set(x)
+		}
+		in = append(in[:numIn-1:numIn-1], slice)
+	default:
+		if len(in) != numIn {
+			panic("reflect: Call with wrong number of input arguments")
+		}
+	}
+
+	// Copy the arguments into fresh memory, converting them to the parameter
+	// types (for example, boxing them into an interface).
+	args := make([]unsafe.Pointer, numIn)
+	for i, x := range in {
+		if !x.IsValid() {
+			panic("reflect: " + op + " using zero Value argument")
+		}
+		arg := newIndirect(t.In(i).(*RawType))
+		arg.Set(x)
+		args[i] = arg.value
+	}
+
+	numOut := t.NumOut()
+	results := make([]unsafe.Pointer, numOut)
+	for i := range results {
+		results[i] = newIndirect(t.Out(i).(*RawType)).value
+	}
+
+	var stub callStub
+	*(*funcHeader)(unsafe.Pointer(&stub)) = funcHeader{Code: ft.call}
+	stub(v.value, unsafe.SliceData(args), unsafe.SliceData(results))
+
+	// Like in upstream Go, the results are not addressable.
+	out := make([]Value, numOut)
+	for i, ptr := range results {
+		typ := t.Out(i).(*RawType)
+		if typ.Size() <= unsafe.Sizeof(uintptr(0)) {
+			ptr = loadSmallValue(ptr, typ.Size())
+		}
+		out[i] = Value{typecode: typ, value: ptr, flags: valueFlagExported}
+	}
+	return out
+}
+
+// newIndirect allocates a zero value of the given type and returns it as an
+// addressable Value.
+func newIndirect(typ *RawType) Value {
+	return Value{
+		typecode: typ,
+		value:    alloc(typ.Size(), typ.gcLayout()),
+		flags:    valueFlagExported | valueFlagIndirect,
+	}
 }
 
 func (v Value) Method(i int) Value {
