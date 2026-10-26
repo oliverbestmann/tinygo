@@ -37,4 +37,12 @@ func main() {
 	expect("lib.SiblingClosures.Foo#2 accepts own", scBC(scB))
 	expect("lib.SiblingClosures.Foo#1 rejects Foo#2", !scAC(scB))
 	expect("lib.SiblingClosures.Foo#2 rejects Foo#1", !scBC(scA))
+
+	// Box[int].Local is only compiled in main through the method set of
+	// Box[int], not through a direct call.
+	var box any = lib.Box[int]{}
+	boxV, boxC := box.(interface{ Local() (any, lib.Checker) }).Local()
+	libBoxV, libBoxC := lib2.BoxLocal()
+	expect("main Box[int].Local.Inner accepts lib2's value", boxC(libBoxV))
+	expect("lib2 Box[int].Local.Inner accepts main's value", libBoxC(boxV))
 }

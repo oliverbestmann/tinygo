@@ -318,6 +318,9 @@ func (c *compilerContext) maybeCreateSyntheticFunction(fn *ssa.Function, llvmFn 
 			c.addError(fn.Pos(), "missing function body")
 			return
 		}
+		// The package scan may not have reached this function, for example a
+		// method of an instantiated type that is only needed for its type code.
+		c.registerLocalTypesFrom(nil, []*ssa.Function{fn}, true)
 		irbuilder := c.ctx.NewBuilder()
 		b := newBuilder(c, irbuilder, fn)
 		b.createFunction()

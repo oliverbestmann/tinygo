@@ -26,3 +26,14 @@ func SiblingClosures() (any, any, Checker, Checker) {
 	}()
 	return av, bv, ac, bc
 }
+
+type Box[T any] struct{}
+
+func Wrap[T any](v T) any { return v }
+
+// Local declares a local type in a method of a generic type. It is passed to
+// another generic function, so the local type is part of a function name.
+func (Box[T]) Local() (any, Checker) {
+	type Inner struct{ V T }
+	return Wrap[Inner](Inner{}), func(x any) bool { _, ok := x.(Inner); return ok }
+}

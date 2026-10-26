@@ -10,3 +10,5 @@ ok: lib.SiblingClosures.Foo#1 accepts own
 ok: lib.SiblingClosures.Foo#2 accepts own
 ok: lib.SiblingClosures.Foo#1 rejects Foo#2
 ok: lib.SiblingClosures.Foo#2 rejects Foo#1
+ok: main Box[int].Local.Inner accepts lib2's value
+ok: lib2 Box[int].Local.Inner accepts main's value

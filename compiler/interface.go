@@ -792,11 +792,34 @@ func (c *compilerContext) getTypeCodeName(t types.Type) (name string, isLocal bo
 // package, and getTypeCodeName derives a stable per-declaration name
 // for them directly from their source position.
 func (c *compilerContext) scanLocalTypes(ssaPkg *ssa.Package) {
-	// Locate every generic instance reachable from this package
+	var roots []*ssa.Function
+	for _, member := range ssaPkg.Members {
+		switch m := member.(type) {
+		case *ssa.Function:
+			roots = append(roots, m)
+		case *ssa.Type:
+			mset := c.program.MethodSets.MethodSet(m.Type())
+			for method := range mset.Methods() {
+				roots = append(roots, c.program.MethodValue(method))
+			}
+			pmset := c.program.MethodSets.MethodSet(types.NewPointer(m.Type()))
+			for method := range pmset.Methods() {
+				roots = append(roots, c.program.MethodValue(method))
+			}
+		}
+	}
+	c.registerLocalTypesFrom(ssaPkg, roots, false)
+}
+
+// registerLocalTypesFrom registers the synthetic local types of every generic
+// instance reachable from roots. With inInstance set, roots count as part of an
+// instance even if another package declares them.
+func (c *compilerContext) registerLocalTypesFrom(ssaPkg *ssa.Package, roots []*ssa.Function, inInstance bool) {
+	// Locate every generic instance reachable from the roots
 	// (including instances declared in imported packages and any
 	// function reached through an instance subtree).
 	var instances []*ssa.Function
-	seen := map[*ssa.Function]struct{}{}
+	seen := c.localTypesScanned
 	var walk func(fn *ssa.Function, inInstance bool)
 	walk = func(fn *ssa.Function, inInstance bool) {
 		if fn == nil {
@@ -840,20 +863,8 @@ func (c *compilerContext) scanLocalTypes(ssaPkg *ssa.Package) {
 			}
 		}
 	}
-	for _, member := range ssaPkg.Members {
-		switch m := member.(type) {
-		case *ssa.Function:
-			walk(m, false)
-		case *ssa.Type:
-			mset := c.program.MethodSets.MethodSet(m.Type())
-			for method := range mset.Methods() {
-				walk(c.program.MethodValue(method), false)
-			}
-			pmset := c.program.MethodSets.MethodSet(types.NewPointer(m.Type()))
-			for method := range pmset.Methods() {
-				walk(c.program.MethodValue(method), false)
-			}
-		}
+	for _, fn := range roots {
+		walk(fn, inInstance)
 	}
 
 	// Registration is first-writer-wins (a synthetic TypeName may be
