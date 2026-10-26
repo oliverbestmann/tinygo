@@ -38,6 +38,17 @@ func decomposeAny(i interface{}) (typecode, value unsafe.Pointer)
 
 // Return true iff both interfaces are equal.
 func interfaceEqual(x, y interface{}) bool {
+	xt, xv := decomposeAny(x)
+	yt, yv := decomposeAny(y)
+	if xt != yt {
+		return false
+	}
+	switch (*reflectlite.RawType)(xt).Kind() {
+	case reflectlite.Invalid:
+		return true // both nil
+	case reflectlite.Chan, reflectlite.Ptr, reflectlite.UnsafePointer:
+		return xv == yv
+	}
 	return reflectValueEqual(reflectlite.ValueOf(x), reflectlite.ValueOf(y))
 }
 
