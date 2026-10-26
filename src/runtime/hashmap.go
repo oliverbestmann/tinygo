@@ -780,25 +780,58 @@ func hashmapFloat64Hash(ptr unsafe.Pointer, seed uintptr) uint32 {
 }
 
 func hashmapInterfaceHash(itf interface{}, seed uintptr) uint32 {
-	x := reflectlite.ValueOf(itf)
-	if x.RawType() == nil {
+	typecode, value := decomposeAny(itf)
+	if typecode == nil {
 		return 0 // nil interface
 	}
 
-	value := (*_interface)(unsafe.Pointer(&itf)).value
-	if x.RawType().Size() <= unsafe.Sizeof(uintptr(0)) {
-		// Value fits in pointer, so it's directly stored in the pointer.
-		// Taking the address of a copy only here keeps larger values from
-		// allocating.
-		small := value
-		return hashmapValueHash(unsafe.Pointer(&small), x.RawType(), seed)
+	t := (*reflectlite.RawType)(typecode)
+	switch t.Kind() {
+	case reflectlite.Chan, reflectlite.Ptr, reflectlite.UnsafePointer:
+		// Common for keys like reflect.Type. Skips the slower Size call.
+		return hash32(unsafe.Pointer(&value), unsafe.Sizeof(value), seed)
 	}
-	return hashmapValueHash(value, x.RawType(), seed)
+	if t.Size() > unsafe.Sizeof(uintptr(0)) {
+		return hashmapValueHash(value, t, seed)
+	}
+
+	// Value fits in pointer, so it's directly stored in the pointer.
+	if k := t.Kind(); k == reflectlite.Struct || k == reflectlite.Array {
+		// LLVM can't prove that the recursive hashmapValueHash doesn't
+		// capture ptr, so this copy is heap allocated.
+		small := value
+		return hashmapValueHash(unsafe.Pointer(&small), t, seed)
+	}
+	return hashmapScalarHash(unsafe.Pointer(&value), t, seed)
 }
 
 // hashmapValueHash hashes the value of type t stored at ptr. It walks arrays
 // and structs in place, so it doesn't allocate.
 func hashmapValueHash(ptr unsafe.Pointer, t *reflectlite.RawType, seed uintptr) uint32 {
+	switch t.Kind() {
+	case reflectlite.Array:
+		elem := t.Elem().(*reflectlite.RawType)
+		var hash uint32
+		for i := range uintptr(t.Len()) {
+			hash = (hash * 31) ^ hashmapValueHash(unsafe.Add(ptr, i*elem.Size()), elem, seed)
+		}
+		return hash
+	case reflectlite.Struct:
+		var hash uint32
+		for i := range t.NumField() {
+			field, offset := t.FieldTypeAndOffset(i)
+			hash = (hash * 31) ^ hashmapValueHash(unsafe.Add(ptr, offset), field, seed)
+		}
+		return hash
+	default:
+		return hashmapScalarHash(ptr, t, seed)
+	}
+}
+
+// hashmapScalarHash hashes a value of type t stored at ptr that is not an
+// array or struct. It doesn't recurse into itself, so LLVM marks ptr
+// nocapture and callers can keep the value on the stack.
+func hashmapScalarHash(ptr unsafe.Pointer, t *reflectlite.RawType, seed uintptr) uint32 {
 	switch t.Kind() {
 	case reflectlite.Int, reflectlite.Int8, reflectlite.Int16, reflectlite.Int32, reflectlite.Int64:
 		return hash32(ptr, t.Size(), seed)
@@ -828,20 +861,6 @@ func hashmapValueHash(ptr unsafe.Pointer, t *reflectlite.RawType, seed uintptr) 
 		return hash32(ptr, t.Size(), seed)
 	case reflectlite.Interface:
 		return hashmapInterfaceHash(*(*interface{})(ptr), seed)
-	case reflectlite.Array:
-		elem := t.Elem().(*reflectlite.RawType)
-		var hash uint32
-		for i := range uintptr(t.Len()) {
-			hash = (hash * 31) ^ hashmapValueHash(unsafe.Add(ptr, i*elem.Size()), elem, seed)
-		}
-		return hash
-	case reflectlite.Struct:
-		var hash uint32
-		for i := range t.NumField() {
-			field, offset := t.FieldTypeAndOffset(i)
-			hash = (hash * 31) ^ hashmapValueHash(unsafe.Add(ptr, offset), field, seed)
-		}
-		return hash
 	default:
 		runtimePanic(errUncomparable)
 		return 0 // unreachable

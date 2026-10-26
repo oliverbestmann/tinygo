@@ -190,6 +190,12 @@ func floatcmplx() {
 	cmap[c]++
 
 	println(cmap[c])
+
+	// same for float32 values stored directly in an interface
+	im := make(map[interface{}]int)
+	im[float32(zero)]++
+	im[float32(negz)]++
+	println(im[float32(0)])
 }
 
 func readMap(m map[string]int, key string) {

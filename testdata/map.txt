@@ -79,6 +79,7 @@ tested growing of a map
 2
 2
 2
+2
 done
 nested array key: 42
 ptr map literal: 1 2
