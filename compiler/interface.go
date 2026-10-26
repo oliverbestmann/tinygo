@@ -8,6 +8,7 @@ package compiler
 import (
 	"encoding/binary"
 	"fmt"
+	"go/ast"
 	"go/token"
 	"go/types"
 	"path/filepath"
@@ -640,8 +641,9 @@ var basicTypeNames = [...]string{
 // computed in another package.
 //
 // Synthetic locals (TypeName.Parent() == nil), produced by generic
-// instantiation, are pre-registered by scanLocalTypes because their
-// names must agree across packages that materialize the same instance.
+// instantiation, are named after the instance that declares them (see
+// scanLocalTypes) because their names must agree across packages that
+// materialize the same instance.
 func (c *compilerContext) getTypeCodeName(t types.Type) (name string, isLocal bool) {
 	switch t := types.Unalias(t).(type) {
 	case *types.Named:
@@ -669,13 +671,30 @@ func (c *compilerContext) getTypeCodeName(t types.Type) (name string, isLocal bo
 			pos := c.program.Fset.PositionFor(tn.Pos(), false)
 			return fmt.Sprintf("named:%s$%s:%d:%d", t.String(), filepath.Base(pos.Filename), pos.Line, pos.Column), true
 		}
-		// Synthetic local from generic instantiation: must have been
-		// pre-registered by scanLocalTypes.
-		v := c.localTypeNames.At(t)
-		if v == nil {
+		// Synthetic local from generic instantiation: its owner must have
+		// been registered by scanLocalTypes.
+		if v := c.localTypeNames.At(t); v != nil {
+			if v == "" {
+				panic("compiler: synthetic local type " + tn.Name() + " is part of its own name")
+			}
+			return "named:" + v.(string), true
+		}
+		owner, ok := c.localTypeOwners.At(t).(localTypeOwner)
+		if !ok {
 			panic("compiler: synthetic local type " + tn.Name() + " was not registered by scanLocalTypes")
 		}
-		return "named:" + v.(string), true
+		c.localTypeNames.Set(t, "") // detect recursion
+		pos := c.program.Fset.PositionFor(tn.Pos(), false)
+		name := fmt.Sprintf("%s.%s$%s:%d:%d", c.canonicalFunctionName(owner.fn), tn.Name(), filepath.Base(pos.Filename), pos.Line, pos.Column)
+		if targs := t.TypeArgs(); targs.Len() != 0 {
+			parts := make([]string, targs.Len())
+			for i := range parts {
+				parts[i], _ = c.getTypeCodeName(targs.At(i))
+			}
+			name += "[" + strings.Join(parts, ",") + "]"
+		}
+		c.localTypeNames.Set(t, name)
+		return "named:" + name, true
 	case *types.Array:
 		s, isLocal := c.getTypeCodeName(t.Elem())
 		return "array:" + strconv.FormatInt(t.Len(), 10) + ":" + s, isLocal
@@ -766,15 +785,15 @@ func (c *compilerContext) getTypeCodeName(t types.Type) (name string, isLocal bo
 	}
 }
 
-// scanLocalTypes assigns names to every synthetic *types.TypeName
+// scanLocalTypes finds the owner of every synthetic *types.TypeName
 // (TypeName.Parent() == nil) reachable from this package and stores
-// them in c.localTypeNames.
+// it in c.localTypeOwners. getTypeCodeName uses the owner to name the type.
 //
 // Synthetic TypeNames are produced by generic instantiation: two
 // instantiations of the same generic function (e.g. F[int] and
 // F[string]) produce TypeNames with the same printed name and the
-// same source position, so each is named with the enclosing instance's
-// canonical function name as prefix. The function name encodes the type
+// same source position, so each is named after the canonical function
+// name of the instance that declares it. The function name encodes the type
 // arguments, matching Go's runtime behavior, where F[int].Inner and
 // F[string].Inner are distinct types even when Inner does not mention
 // the type parameter.
@@ -783,9 +802,9 @@ func (c *compilerContext) getTypeCodeName(t types.Type) (name string, isLocal bo
 // of F[int] is compiled in every package that calls F[int]); its
 // reflect/types.type:* global has LinkOnceODRLinkage and is merged by
 // name at link time. The chosen name therefore depends only on
-// intrinsic SSA properties (the canonical function name and raw token.Pos),
-// so any package compiling the same instance produces the same
-// identifier.
+// intrinsic SSA properties (the canonical function name of the declaring
+// instance and the declaration position), so any package compiling the
+// same instance produces the same identifier.
 //
 // Ordinary function-local TypeNames (TypeName.Parent() != nil) are
 // not handled here: they are nameable only inside their declaring
@@ -882,17 +901,20 @@ func (c *compilerContext) registerLocalTypesFrom(ssaPkg *ssa.Package, roots []*s
 	}
 }
 
+// localTypeOwner is the function a synthetic local type is named after.
+type localTypeOwner struct {
+	fn       *ssa.Function
+	declared bool // whether fn declares the type, instead of only using it
+}
+
 // registerSyntheticLocalTypes walks every type reachable from fn's
-// body and records each synthetic *types.Named (TypeName.Parent() ==
-// nil) in c.localTypeNames. Each is named with the canonical function
-// name plus a per-function counter assigned in source order.
+// body and records fn as the owner of each synthetic *types.Named
+// (TypeName.Parent() == nil) in c.localTypeOwners.
 //
-// First-writer-wins: a *types.Named already present in
-// c.localTypeNames is left alone, so a synthetic type reachable from
-// several instances keeps the name assigned by the first (in
-// scanLocalTypes' deterministic order).
+// The instance that declares the type replaces any other owner. A function that
+// only uses the type, like F[Local], is a fallback, as its own name depends on
+// the name of the type. Among fallbacks the first in scanLocalTypes order stays.
 func (c *compilerContext) registerSyntheticLocalTypes(fn *ssa.Function) {
-	var found []*types.Named
 	seen := map[types.Type]struct{}{}
 	var visit func(t types.Type)
 	visit = func(t types.Type) {
@@ -909,13 +931,10 @@ func (c *compilerContext) registerSyntheticLocalTypes(fn *ssa.Function) {
 		case *types.Named:
 			tn := t.Obj()
 			if tn.Pkg() != nil && tn.Parent() == nil {
-				if c.localTypeNames.At(t) == nil {
-					// Reserve the slot so later calls within this
-					// scanLocalTypes invocation skip it; the final
-					// name is filled in after sorting, before any
-					// getTypeCodeName lookups happen.
-					c.localTypeNames.Set(t, "")
-					found = append(found, t)
+				declared := declaresLocalType(fn, tn.Pos())
+				owner, ok := c.localTypeOwners.At(t).(localTypeOwner)
+				if !ok || declared && !owner.declared {
+					c.localTypeOwners.Set(t, localTypeOwner{fn: fn, declared: declared})
 				}
 			}
 			targs := t.TypeArgs()
@@ -981,25 +1000,38 @@ func (c *compilerContext) registerSyntheticLocalTypes(fn *ssa.Function) {
 				visit(v.Type())
 			}
 			for _, op := range instr.Operands(ops[:0]) {
-				if op != nil && *op != nil {
-					visit((*op).Type())
+				if op == nil || *op == nil {
+					continue
+				}
+				visit((*op).Type())
+				if callee, ok := (*op).(*ssa.Function); ok {
+					// A local type may only be used as type argument, like
+					// in F[Local]().
+					for _, t := range callee.TypeArgs() {
+						visit(t)
+					}
 				}
 			}
 		}
 	}
-	if len(found) == 0 {
-		return
+}
+
+// declaresLocalType reports whether the local type declared at pos is declared
+// in the body of fn itself (and not in a closure inside fn). Instances share
+// the syntax of their generic origin.
+func declaresLocalType(fn *ssa.Function, pos token.Pos) bool {
+	contains := func(n ast.Node) bool {
+		return n != nil && n.Pos() <= pos && pos < n.End()
 	}
-	// Sort by raw token.Pos: this gives a total order on declarations
-	// that is stable across builds and unaffected by //line directives
-	// (which only adjust the human-facing position from Fset.Position).
-	sort.Slice(found, func(i, j int) bool {
-		return found[i].Obj().Pos() < found[j].Obj().Pos()
-	})
-	enclosing := c.canonicalFunctionName(fn)
-	for i, named := range found {
-		c.localTypeNames.Set(named, fmt.Sprintf("%s.%s$%d", enclosing, named.Obj().Name(), i))
+	if !contains(fn.Syntax()) {
+		return false
 	}
+	for _, anon := range fn.AnonFuncs {
+		if contains(anon.Syntax()) {
+			return false
+		}
+	}
+	return true
 }
 
 // getTypeMethodSet returns a reference (GEP) to a global method set. This

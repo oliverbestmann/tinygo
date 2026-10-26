@@ -417,6 +417,21 @@ func main() {
 	expect("promotedB T.ID", promotedValueB().ID() == 2)
 	expect("promotedA bound and thunk", promotedFuncsA() == 11)
 	expect("promotedB bound and thunk", promotedFuncsB() == 22)
+
+	// A local type of an instance, used as type argument of another
+	// instance that sorts first, is still named after the declaring instance.
+	expect("zDeclare[int].QV field is int", reflect.TypeOf(zDeclare(1)).Field(0).Type.Kind() == reflect.Int)
+	expect("zDeclare[string].QV field is string", reflect.TypeOf(zDeclare("s")).Field(0).Type.Kind() == reflect.String)
+}
+
+func aUse[T any]() any {
+	var t T
+	return t
+}
+
+func zDeclare[T any](T) any {
+	type QV struct{ V T }
+	return aUse[QV]()
 }
 
 type idBase struct{ id int }

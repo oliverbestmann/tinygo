@@ -105,6 +105,7 @@ type compilerContext struct {
 	packageDir       string          // directory for this package
 	runtimePkg       *types.Package
 	localTypeNames   typeutil.Map // *types.Named (synthetic local from generic instantiation) -> string
+	localTypeOwners  typeutil.Map // *types.Named (synthetic local from generic instantiation) -> localTypeOwner
 
 	// Functions already visited when registering synthetic local types.
 	localTypesScanned map[*ssa.Function]struct{}

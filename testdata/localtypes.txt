@@ -67,3 +67,5 @@ ok: promotedA T.ID
 ok: promotedB T.ID
 ok: promotedA bound and thunk
 ok: promotedB bound and thunk
+ok: zDeclare[int].QV field is int
+ok: zDeclare[string].QV field is string
