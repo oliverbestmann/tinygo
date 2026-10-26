@@ -761,14 +761,6 @@ func hashmapStringDelete(m *hashmap, key string) {
 
 // Hashmap with interface keys (for everything else).
 
-// This is a method that is intentionally unexported in the reflect package. It
-// is identical to the Interface() method call, except it doesn't check whether
-// a field is exported and thus allows circumventing the type system.
-// The hash function needs it as it also needs to hash unexported struct fields.
-//
-//go:linkname valueInterfaceUnsafe internal/reflectlite.valueInterfaceUnsafe
-func valueInterfaceUnsafe(v reflectlite.Value) interface{}
-
 func hashmapFloat32Hash(ptr unsafe.Pointer, seed uintptr) uint32 {
 	f := *(*uint32)(ptr)
 	if f == 0x80000000 {
@@ -794,17 +786,24 @@ func hashmapInterfaceHash(itf interface{}, seed uintptr) uint32 {
 	}
 
 	value := (*_interface)(unsafe.Pointer(&itf)).value
-	ptr := value
 	if x.RawType().Size() <= unsafe.Sizeof(uintptr(0)) {
 		// Value fits in pointer, so it's directly stored in the pointer.
-		ptr = unsafe.Pointer(&value)
+		// Taking the address of a copy only here keeps larger values from
+		// allocating.
+		small := value
+		return hashmapValueHash(unsafe.Pointer(&small), x.RawType(), seed)
 	}
+	return hashmapValueHash(value, x.RawType(), seed)
+}
 
-	switch x.RawType().Kind() {
+// hashmapValueHash hashes the value of type t stored at ptr. It walks arrays
+// and structs in place, so it doesn't allocate.
+func hashmapValueHash(ptr unsafe.Pointer, t *reflectlite.RawType, seed uintptr) uint32 {
+	switch t.Kind() {
 	case reflectlite.Int, reflectlite.Int8, reflectlite.Int16, reflectlite.Int32, reflectlite.Int64:
-		return hash32(ptr, x.RawType().Size(), seed)
+		return hash32(ptr, t.Size(), seed)
 	case reflectlite.Bool, reflectlite.Uint, reflectlite.Uint8, reflectlite.Uint16, reflectlite.Uint32, reflectlite.Uint64, reflectlite.Uintptr:
-		return hash32(ptr, x.RawType().Size(), seed)
+		return hash32(ptr, t.Size(), seed)
 	case reflectlite.Float32:
 		// It should be possible to just has the contents. However, NaN != NaN
 		// so if you're using lots of NaNs as map keys (you shouldn't) then hash
@@ -821,22 +820,26 @@ func hashmapInterfaceHash(itf interface{}, seed uintptr) uint32 {
 		rptr, iptr := ptr, unsafe.Add(ptr, 8)
 		return hashmapFloat64Hash(rptr, seed) ^ hashmapFloat64Hash(iptr, seed)
 	case reflectlite.String:
-		return hashmapStringHash(x.String(), seed)
+		return hashmapStringPtrHash(ptr, 0, seed)
 	case reflectlite.Chan, reflectlite.Ptr, reflectlite.UnsafePointer:
 		// It might seem better to just return the pointer, but that won't
 		// result in an evenly distributed hashmap. Instead, hash the pointer
 		// like most other types.
-		return hash32(ptr, x.RawType().Size(), seed)
+		return hash32(ptr, t.Size(), seed)
+	case reflectlite.Interface:
+		return hashmapInterfaceHash(*(*interface{})(ptr), seed)
 	case reflectlite.Array:
+		elem := t.Elem().(*reflectlite.RawType)
 		var hash uint32
-		for i := 0; i < x.Len(); i++ {
-			hash = (hash * 31) ^ hashmapInterfaceHash(valueInterfaceUnsafe(x.Index(i)), seed)
+		for i := range uintptr(t.Len()) {
+			hash = (hash * 31) ^ hashmapValueHash(unsafe.Add(ptr, i*elem.Size()), elem, seed)
 		}
 		return hash
 	case reflectlite.Struct:
 		var hash uint32
-		for i := 0; i < x.NumField(); i++ {
-			hash = (hash * 31) ^ hashmapInterfaceHash(valueInterfaceUnsafe(x.Field(i)), seed)
+		for i := range t.NumField() {
+			field, offset := t.FieldTypeAndOffset(i)
+			hash = (hash * 31) ^ hashmapValueHash(unsafe.Add(ptr, offset), field, seed)
 		}
 		return hash
 	default:

@@ -576,6 +576,14 @@ func (t *RawType) rawFieldDescriptor(n int) (*structType, *structField) {
 	return descriptor, field
 }
 
+// FieldTypeAndOffset returns the type and offset of the n'th struct field.
+// The runtime uses it to hash struct values without allocating.
+func (t *RawType) FieldTypeAndOffset(n int) (*RawType, uintptr) {
+	_, field := t.rawFieldDescriptor(n)
+	offset, _ := uvarint32(unsafe.Slice((*byte)(unsafe.Add(field.data, 1)), maxVarintLen32))
+	return field.fieldType, uintptr(offset)
+}
+
 func (field *structField) decode() (flagsByte uint8, name string, offset uint32) {
 	data := unsafe.Add(field.data, 1)
 	offset, lenOffs := uvarint32(unsafe.Slice((*byte)(data), maxVarintLen32))

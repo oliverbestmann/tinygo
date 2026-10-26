@@ -362,8 +362,9 @@ func comparableHash[T comparable](v T, seed Seed) uint64 {
 	// The runtime hasher gives 32 bits, so always combine two hashes. Each
 	// seed half is made odd because the FNV hash gives 0 for a 0 seed.
 	// See hash32 in src/runtime/memhash_fnv.go.
-	lo := runtime_comparablehash(v, uintptr(uint32(s)|1))
-	hi := runtime_comparablehash(v, uintptr(uint32(s>>32)|1))
+	itf := any(v)
+	lo := runtime_comparablehash(itf, uintptr(uint32(s)|1))
+	hi := runtime_comparablehash(itf, uintptr(uint32(s>>32)|1))
 	return uint64(hi)<<32 | uint64(lo)
 }
 

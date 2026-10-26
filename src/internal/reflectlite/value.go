@@ -161,8 +161,6 @@ func TypeAssert[T any](v Value) (T, bool) {
 	return *(*T)(v.value), true
 }
 
-// valueInterfaceUnsafe is used by the runtime to hash map keys. It should not
-// be subject to the isExported check.
 // loadSmallValue loads a value of size <= sizeof(uintptr) from ptr into
 // a pointer-sized value suitable for storing in an interface's data field.
 func loadSmallValue(ptr unsafe.Pointer, size uintptr) unsafe.Pointer {
