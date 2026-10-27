@@ -57,6 +57,13 @@ var (
 
 const finalizerGCDivisor = 2
 
+// A full collection of a large heap takes long. Pressure GC waits finalizerGCPause times
+// the duration of its last collection, so it takes at most about 10% of the time.
+const finalizerGCPause = 9
+
+// finalizerGCNext is the earliest time in nanoseconds for the next pressure GC.
+var finalizerGCNext int64
+
 // finalizerGCTrigger scales the threshold so scan work stays proportional to registrations.
 // It uses finalizerGCThreshold as the minimum.
 func finalizerGCTrigger() uintptr {
@@ -401,9 +408,15 @@ func finalizerPressureGC() bool {
 	if trigger == 0 || finalizersSinceGC < trigger {
 		return false
 	}
+	start := nanotime()
+	if start < finalizerGCNext {
+		return false
+	}
 	gcLock.Lock()
 	runGC()
 	gcLock.Unlock()
+	end := nanotime()
+	finalizerGCNext = end + (end-start)*finalizerGCPause
 	if finalizersQueued {
 		finalizersQueued = false
 		wakeFinalizer()
