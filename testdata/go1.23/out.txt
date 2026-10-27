@@ -18,4 +18,6 @@
 3
 2
 1
+a
+b
 go1.23 has lift-off!

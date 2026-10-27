@@ -131,6 +131,7 @@ func getLifetimeEndFunc(mod llvm.Module) (llvm.Type, llvm.Value) {
 func SplitBasicBlock(builder llvm.Builder, afterInst llvm.Value, insertAfter llvm.BasicBlock, name string) llvm.BasicBlock {
 	oldBlock := afterInst.InstructionParent()
 	newBlock := afterInst.Type().Context().InsertBasicBlock(insertAfter, name)
+	newBlock.MoveAfter(insertAfter)
 	var nextInstructions []llvm.Value // values to move
 
 	// Collect to-be-moved instructions.

@@ -32,7 +32,7 @@ func OptimizePackage(mod llvm.Module, config *compileopts.Config) {
 // Please note that some optimizations are not optional, thus Optimize must
 // always be run before emitting machine code.
 func Optimize(mod llvm.Module, config *compileopts.Config) []error {
-	optLevel, speedLevel, _ := config.OptLevel()
+	optLevel, speedLevel, sizeLevel := config.OptLevel()
 
 	// Make sure these functions are kept in tact during TinyGo transformation passes.
 	for _, name := range functionsUsedInTransforms {
@@ -93,6 +93,11 @@ func Optimize(mod llvm.Module, config *compileopts.Config) []error {
 		removeGlobalAllocPromotionMarker(mod)
 		if err != nil {
 			return []error{fmt.Errorf("could not build pass pipeline: %w", err)}
+		}
+
+		if sizeLevel == 0 {
+			// It grows code size, so it only runs when optimizing for speed.
+			DevirtualizeFuncValues(mod)
 		}
 
 		// Run TinyGo-specific interprocedural optimizations.

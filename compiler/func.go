@@ -248,12 +248,23 @@ func isLLVMValueType(typ types.Type) bool {
 // createFuncValue creates a function value from a raw function pointer with no
 // context.
 func (b *builder) createFuncValue(funcPtr, context llvm.Value, sig *types.Signature) llvm.Value {
+	if !funcPtr.IsAFunction().IsNil() {
+		funcPtr.AddFunctionAttr(b.ctx.CreateStringAttribute("tinygo-funcvalue", b.funcValueKey(sig)))
+	}
+
 	// Closure is: {context, function pointer}
 	funcValueType := b.getFuncType(sig)
 	funcValue := llvm.Undef(funcValueType)
 	funcValue = b.CreateInsertValue(funcValue, context, 0, "")
 	funcValue = b.CreateInsertValue(funcValue, funcPtr, 1, "")
 	return funcValue
+}
+
+// funcValueKey identifies a func value signature for
+// transform.DevirtualizeFuncValues. It ignores the receiver and parameter names.
+func (c *compilerContext) funcValueKey(sig *types.Signature) string {
+	name, _ := c.getTypeCodeName(sig)
+	return name
 }
 
 // extractFuncScalar returns some scalar that can be used in comparisons. It is

@@ -476,6 +476,14 @@ func TestBuild(t *testing.T) {
 			runTestWithConfig("stdlib.go", t, opts, nil, nil)
 		})
 
+		// Test the passes that only run when optimizing for speed.
+		t.Run("opt=2", func(t *testing.T) {
+			t.Parallel()
+			opts := optionsFromTarget("", sema)
+			opts.Opt = "2"
+			runTestWithConfig("go1.23/", t, opts, nil, nil)
+		})
+
 		// Test with only the bare minimum of optimizations enabled.
 		// TODO: fix this for stdlib.go, which currently fails.
 		t.Run("opt=0", func(t *testing.T) {

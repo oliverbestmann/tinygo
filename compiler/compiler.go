@@ -2505,7 +2505,7 @@ func (b *builder) createFunctionCall(instr *ssa.CallCommon) (llvm.Value, error) 
 			result := b.createIndirectStorage(abi.resultType, "call.result")
 			params = append([]llvm.Value{result}, params...)
 			params = append(params, context)
-			b.createInvoke(calleeType, callee, params, "", instr)
+			b.tagFuncValueCall(instr, callee, b.createInvoke(calleeType, callee, params, "", instr))
 			return result, nil
 		}
 		// This function takes a context parameter.
@@ -2513,7 +2513,22 @@ func (b *builder) createFunctionCall(instr *ssa.CallCommon) (llvm.Value, error) 
 		params = append(params, context)
 	}
 
-	return b.createInvoke(calleeType, callee, params, "", instr), nil
+	call := b.createInvoke(calleeType, callee, params, "", instr)
+	b.tagFuncValueCall(instr, callee, call)
+	return call, nil
+}
+
+// tagFuncValueCall marks a plain call of a func value with its signature key,
+// for transform.DevirtualizeFuncValues.
+func (b *builder) tagFuncValueCall(instr *ssa.CallCommon, callee, call llvm.Value) {
+	if instr.IsInvoke() || instr.StaticCallee() != nil {
+		return
+	}
+	if call.IsACallInst().IsNil() || call.CalledValue() != callee {
+		return
+	}
+	sig := instr.Value.Type().Underlying().(*types.Signature)
+	call.AddCallSiteAttribute(-1, b.ctx.CreateStringAttribute("tinygo-funcvalue", b.funcValueKey(sig)))
 }
 
 // getValue returns the LLVM value of a constant, function value, global, or

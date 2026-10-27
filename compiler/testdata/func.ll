@@ -18,11 +18,11 @@ entry:
   br i1 %0, label %fpcall.throw, label %fpcall.next
 
 fpcall.next:                                      ; preds = %entry
-  call void %callback.funcptr(i32 3, ptr %callback.context) #2
+  call void %callback.funcptr(i32 3, ptr %callback.context) #3
   ret void
 
 fpcall.throw:                                     ; preds = %entry
-  call void @runtime.nilPanic(ptr undef) #2
+  call void @runtime.nilPanic(ptr undef) #4
   br label %unwind.return
 
 unwind.return:                                    ; preds = %fpcall.throw
@@ -39,11 +39,13 @@ entry:
 }
 
 ; Function Attrs: nounwind
-define hidden void @main.someFunc(i32 %arg0, ptr %context) unnamed_addr #1 {
+define hidden void @main.someFunc(i32 %arg0, ptr %context) unnamed_addr #2 {
 entry:
   ret void
 }
 
 attributes #0 = { "target-features"="+bulk-memory,+bulk-memory-opt,+call-indirect-overlong,+mutable-globals,+nontrapping-fptoint,+sign-ext,-multivalue,-reference-types" }
 attributes #1 = { nounwind "target-features"="+bulk-memory,+bulk-memory-opt,+call-indirect-overlong,+mutable-globals,+nontrapping-fptoint,+sign-ext,-multivalue,-reference-types" }
-attributes #2 = { nounwind }
+attributes #2 = { nounwind "target-features"="+bulk-memory,+bulk-memory-opt,+call-indirect-overlong,+mutable-globals,+nontrapping-fptoint,+sign-ext,-multivalue,-reference-types" "tinygo-funcvalue"="func:{basic:int}{}" }
+attributes #3 = { nounwind "tinygo-funcvalue"="func:{basic:int}{}" }
+attributes #4 = { nounwind }
