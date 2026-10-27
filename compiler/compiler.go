@@ -2297,6 +2297,11 @@ func (b *builder) createBuiltin(argTypes []types.Type, argValues []llvm.Value, c
 		// Note: the pointer is always of type *i8.
 		ptr := argValues[0]
 		len := argValues[1]
+		if ptr.IsNull() {
+			// A GEP on null points to no object, so LLVM may remove accesses through it.
+			// Code translated from C (ccgo) uses unsafe.Add(nil, addr) for addresses.
+			return b.CreateIntToPtr(b.CreateIntCast(len, b.uintptrType, ""), ptr.Type(), ""), nil
+		}
 		return b.CreateGEP(b.ctx.Int8Type(), ptr, []llvm.Value{len}, ""), nil
 	case "Alignof": // unsafe.Alignof
 		align := b.targetData.ABITypeAlignment(argValues[0].Type())

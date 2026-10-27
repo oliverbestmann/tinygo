@@ -146,6 +146,7 @@ func main() {
 	*(*int)(unsafe.Add(unsafe.Pointer(&arr2[0]), unsafe.Sizeof(int(1))*1)) = 5
 	*addInt(&arr2[0], 2) = 8
 	println("unsafe.Add array:", arr2[0], arr2[1], arr2[2], arr2[3])
+	println("unsafe.Add nil:", storeAddNil(&arr2[0]), loadAddNil(&arr2[1]))
 
 	// Test unsafe.Slice.
 	arr3 := [...]int{1, 2, 3, 4}
@@ -308,4 +309,20 @@ func makeMyUint8(x myUint8) myUint8 { return x }
 
 func addInt(ptr *int, index uintptr) *int {
 	return (*int)(unsafe.Add(unsafe.Pointer(ptr), unsafe.Sizeof(int(1))*index))
+}
+
+// storeAddNil and loadAddNil access memory through unsafe.Add(nil, addr), like code
+// translated from C does. The compiler must not assume that such a pointer aliases nothing.
+//
+//go:noinline
+func storeAddNil(p *int) int {
+	*p = 1
+	*(*int)(unsafe.Add(nil, uintptr(unsafe.Pointer(p)))) = 6
+	return *p
+}
+
+//go:noinline
+func loadAddNil(p *int) int {
+	*p = 7
+	return *(*int)(unsafe.Add(nil, uintptr(unsafe.Pointer(p))))
 }
