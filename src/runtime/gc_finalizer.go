@@ -61,8 +61,18 @@ const finalizerGCDivisor = 2
 // the duration of its last collection, so it takes at most about 10% of the time.
 const finalizerGCPause = 9
 
-// finalizerGCNext is the earliest time in nanoseconds for the next pressure GC.
-var finalizerGCNext int64
+// Pressure GC sweeps in slices of at most finalizerGCSlice nanoseconds, with a
+// pause of finalizerGCSliceGap between slices, so it doesn't stall a frame.
+const (
+	finalizerGCSlice    = 1_500_000
+	finalizerGCSliceGap = 8_000_000
+)
+
+var (
+	finalizerGCNext    int64 // earliest time in nanoseconds for the next pressure GC
+	finalizerSweepNext int64 // earliest time in nanoseconds for the next sweep slice
+	finalizerGCTime    int64 // time spent in the current pressure GC
+)
 
 // finalizerGCTrigger scales the threshold so scan work stays proportional to registrations.
 // It uses finalizerGCThreshold as the minimum.
@@ -404,6 +414,24 @@ func dequeueFinalizer() (*finalizerEntry, unsafe.Pointer) {
 // finalizerPressureGC runs a GC when registrations indicate external memory pressure.
 // It wakes the finalizer runner when the GC queues work.
 func finalizerPressureGC() bool {
+	if sweepPending() {
+		start := nanotime()
+		if start < finalizerSweepNext {
+			return false
+		}
+		gcLock.Lock()
+		sweepFor(start + finalizerGCSlice)
+		done := !sweepPending()
+		gcLock.Unlock()
+		end := nanotime()
+		finalizerGCTime += end - start
+		finalizerSweepNext = end + finalizerGCSliceGap
+		if done {
+			finalizerGCNext = end + finalizerGCTime*finalizerGCPause
+		}
+		return false
+	}
+
 	trigger := finalizerGCTrigger()
 	if trigger == 0 || finalizersSinceGC < trigger {
 		return false
@@ -412,11 +440,14 @@ func finalizerPressureGC() bool {
 	if start < finalizerGCNext {
 		return false
 	}
+	// Mark now and leave the sweep to the following calls.
 	gcLock.Lock()
-	runGC()
+	gcMark()
 	gcLock.Unlock()
 	end := nanotime()
-	finalizerGCNext = end + (end-start)*finalizerGCPause
+	finalizerGCTime = end - start
+	finalizerGCNext = end + finalizerGCTime*finalizerGCPause
+	finalizerSweepNext = end + finalizerGCSliceGap
 	if finalizersQueued {
 		finalizersQueued = false
 		wakeFinalizer()

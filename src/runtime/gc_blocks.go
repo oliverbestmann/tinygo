@@ -509,6 +509,12 @@ func alloc(size uintptr, layout unsafe.Pointer) unsafe.Pointer {
 			break
 		}
 
+		if sweepPending() {
+			// The next part of the sweep may free enough blocks.
+			sweepChunk()
+			continue
+		}
+
 		if !ranGC {
 			// Run the collector and try again.
 			freeBytes := runGC()
@@ -633,7 +639,10 @@ func free(ptr unsafe.Pointer) {
 		block.free()
 	}
 	setPageHeads(firstBlock, lastBlock, 0)
-	insertFreeRange(firstBlock.pointer(), uintptr(lastBlock-firstBlock+1))
+	if firstBlock >= sweepFreeEnd {
+		// A pending sweep puts free blocks below sweepFreeEnd on the free list itself.
+		insertFreeRange(firstBlock.pointer(), uintptr(lastBlock-firstBlock+1))
+	}
 	gcLock.Unlock()
 }
 
@@ -650,7 +659,10 @@ func freeTaskStack(addr uintptr) {
 		block.free()
 	}
 	setPageHeads(firstBlock, lastBlock, 0)
-	insertFreeRange(ptr, uintptr(lastBlock-firstBlock+1))
+	if firstBlock >= sweepFreeEnd {
+		// A pending sweep puts free blocks below sweepFreeEnd on the free list itself.
+		insertFreeRange(ptr, uintptr(lastBlock-firstBlock+1))
+	}
 	gcLock.Unlock()
 }
 
@@ -673,9 +685,26 @@ func GC() {
 //
 //go:noheap
 func runGC() (freeBytes uintptr) {
+	gcMark()
+	freeBytes = finishSweep()
+
+	// Show how much has been sweeped, for debugging.
+	if gcDebug {
+		dumpHeap()
+	}
+	return
+}
+
+// gcMark finishes any pending sweep, marks all reachable objects and starts a
+// new sweep. The caller must finish the sweep before the next mark phase.
+//
+//go:noheap
+func gcMark() {
 	if gcDebug {
 		println("running collection cycle...")
 	}
+
+	finishSweep()
 
 	// Mark phase: mark all reachable objects, recursively.
 	gcMarkReachable()
@@ -723,19 +752,12 @@ func runGC() (freeBytes uintptr) {
 
 	// Sweep phase: free all non-marked objects and unmark marked objects for
 	// the next collection cycle. This also rebuilds the free ranges list.
-	freeBytes = sweep()
+	startSweep()
 
-	// Show how much has been sweeped, for debugging.
-	if gcDebug {
-		dumpHeap()
-	}
-
-	// The cycle is complete. Counted here rather than in GC() so that
-	// collections triggered by an allocation are counted too. Every caller
-	// holds gcLock, the same lock ReadMemStats reads it under.
+	// The cycle is complete apart from the sweep. Counted here rather than in
+	// GC() so that collections triggered by an allocation are counted too.
+	// Every caller holds gcLock, the same lock ReadMemStats reads it under.
 	gcNumGC++
-
-	return
 }
 
 // markRoots reads all pointers from start to end (exclusive) and if they look
@@ -859,19 +881,80 @@ func stateWord(b gcBlock) *uint64 {
 	return (*uint64)(unsafe.Add(metadataStart, b/blocksPerStateByte))
 }
 
-// Sweep goes through all memory and frees unmarked memory.
-func sweep() uintptr {
-	// Discard the old free ranges list.
-	freeRanges = nil
+// Sweep runs backwards through the heap, possibly in several steps. Blocks
+// below sweepBlock still have the states of the last mark phase. Blocks from
+// sweepBlock to sweepFreeEnd are free, but not on the free list yet.
+var (
+	sweepBlock      gcBlock
+	sweepFreeEnd    gcBlock
+	sweepFreeBlocks uintptr // number of free blocks found by the current sweep
+)
 
-	// Scan backwards through the block metadata.
-	block := endBlock
-	var freeBlocks uintptr
-	for {
+// sweepPending returns whether a sweep has not finished yet.
+func sweepPending() bool {
+	return sweepBlock != 0 || sweepFreeEnd != 0
+}
+
+// startSweep starts sweeping after a mark phase. The free list is rebuilt
+// from scratch.
+func startSweep() {
+	freeRanges = nil
+	sweepBlock, sweepFreeEnd, sweepFreeBlocks = endBlock, endBlock, 0
+}
+
+// finishSweep sweeps all remaining blocks. It returns the number of free bytes
+// found by the last sweep.
+//
+//go:noheap
+func finishSweep() uintptr {
+	sweepStep(0)
+	return sweepFreeBlocks * bytesPerBlock
+}
+
+// sweepBlocksPerChunk is the number of blocks that alloc sweeps when it finds no
+// free range, and that sweepFor sweeps between time checks.
+const sweepBlocksPerChunk = 1 << 16
+
+// sweepFor sweeps until the sweep is done or nanotime passes deadline.
+//
+//go:noheap
+func sweepFor(deadline int64) {
+	for sweepPending() && nanotime() < deadline {
+		sweepChunk()
+	}
+}
+
+// sweepChunk sweeps the next sweepBlocksPerChunk blocks.
+func sweepChunk() {
+	stop := gcBlock(0)
+	if sweepBlock > sweepBlocksPerChunk {
+		stop = sweepBlock - sweepBlocksPerChunk
+	}
+	sweepStep(stop)
+}
+
+// sweepInsertFree puts the free blocks start..end on the free list.
+func sweepInsertFree(start, end gcBlock) {
+	if end == start {
+		return
+	}
+	sweepFreeBlocks += uintptr(end - start)
+	// A page fully covered by a freed object lies fully in this range.
+	setPageHeads(start, end-1, 0)
+	insertFreeRange(start.pointer(), uintptr(end-start))
+}
+
+// sweepStep frees unmarked blocks and unmarks marked heads, from sweepBlock
+// down to about stop. It finishes the object it is in, so it may go further.
+func sweepStep(stop gcBlock) {
+	if !sweepPending() {
+		return
+	}
+	block, freeEnd := sweepBlock, sweepFreeEnd
+	for block > stop {
 		// Scan backwards until we find a marked head.
 		// Free the blocks as we go.
-		freeEnd := block
-		for block > 0 {
+		for block > stop {
 			if block%blocksPerStateWord == 0 {
 				// Free all blocks of a word without marked blocks at once.
 				w := stateWord(block - blocksPerStateWord)
@@ -887,19 +970,13 @@ func sweep() uintptr {
 			block--
 			block.free()
 		}
-
-		if freeLen := uintptr(freeEnd - block); freeLen > 0 {
-			// Insert the freed blocks.
-			freeBlocks += freeLen
-			// A page fully covered by a freed object lies fully in this range.
-			setPageHeads(block, freeEnd-1, 0)
-			insertFreeRange(block.pointer(), freeLen)
-		}
-
-		if block == 0 {
-			// There are no more blocks to sweep.
+		if block <= stop {
+			// Continue this free range in the next step.
 			break
 		}
+
+		// Insert the freed blocks.
+		sweepInsertFree(block, freeEnd)
 
 		// Unmark the next head.
 		block--
@@ -919,7 +996,16 @@ func sweep() uintptr {
 			}
 			block--
 		}
+		freeEnd = block
 	}
+	sweepBlock, sweepFreeEnd = block, freeEnd
+	if block != 0 {
+		return
+	}
+
+	// There are no more blocks to sweep.
+	sweepInsertFree(0, freeEnd)
+	sweepFreeEnd = 0
 
 	if gcAsserts {
 		// Only manual allocations stay marked.
@@ -934,8 +1020,6 @@ func sweep() uintptr {
 		println("free ranges after sweep:")
 		dumpFreeRangeCounts()
 	}
-
-	return freeBlocks * bytesPerBlock
 }
 
 func dumpFreeRangeCounts() {
@@ -975,6 +1059,9 @@ func dumpHeap() {
 // call to ReadMemStats. This would not do GC implicitly for you.
 func ReadMemStats(m *MemStats) {
 	gcLock.Lock()
+
+	// The counts below need the block states without marks.
+	finishSweep()
 
 	// Calculate the raw size of the heap.
 	heapEnd := heapEnd

@@ -391,6 +391,7 @@ func TestBuild(t *testing.T) {
 		"finalizeridle.go",
 		"finalizerinvariants.go",
 		"finalizerlarge.go",
+		"finalizersweep.go",
 		"float.go",
 		"gc.go",
 		"generics.go",
@@ -828,7 +829,7 @@ func runPlatTests(options compileopts.Options, tests []string, t *testing.T) {
 		}
 		if options.Target != "wasm" {
 			switch name {
-			case "finalizer.go", "finalizerbits.go", "finalizeridle.go", "finalizerlarge.go":
+			case "finalizer.go", "finalizerbits.go", "finalizeridle.go", "finalizerlarge.go", "finalizersweep.go":
 				// These tests require deterministic finalization on target wasm.
 				// finalizerinvariants.go covers other block GC targets.
 				continue
@@ -854,7 +855,7 @@ func runPlatTests(options compileopts.Options, tests []string, t *testing.T) {
 			t.Parallel()
 			testOptions := compileopts.Options(options)
 			switch name {
-			case "finalizerinvariants.go", "finalizerlarge.go", "gc.go", "interface.go", "interface-blank.go":
+			case "finalizerinvariants.go", "finalizerlarge.go", "finalizersweep.go", "gc.go", "interface.go", "interface-blank.go":
 				testOptions.Tags = append(append([]string(nil), options.Tags...), "runtime_asserts")
 			}
 			if testOptions.Target == "simavr" && (name == "math.go" || name == "string.go") {
