@@ -446,7 +446,8 @@ func calculateHeapAddresses() {
 
 	// Allocate some memory to keep 2 bits of information about every block.
 	metadataSize := (totalSize + blocksPerStateByte*bytesPerBlock) / (1 + blocksPerStateByte*bytesPerBlock)
-	metadataStart = unsafe.Pointer(uintptr(pageHeads) - metadataSize)
+	// Align the metadata so that sweep can read it in 64-bit words.
+	metadataStart = unsafe.Pointer((uintptr(pageHeads) - metadataSize) &^ 7)
 
 	// Use the rest of the available memory as heap.
 	numBlocks := (uintptr(metadataStart) - heapStart) / bytesPerBlock
@@ -539,6 +540,13 @@ func alloc(size uintptr, layout unsafe.Pointer) unsafe.Pointer {
 
 	// Set the block states.
 	block := blockFromAddr(uintptr(pointer))
+	if gcAsserts {
+		for b := block; b < block+gcBlock(neededBlocks); b++ {
+			if b.state() != blockStateFree {
+				runtimeFatal("gc: free list contains a used block")
+			}
+		}
+	}
 	i := block + gcBlock(neededBlocks) - 1
 	i.setState(blockStateHead)
 	if neededBlocks >= blocksPerPage {
@@ -838,6 +846,19 @@ func markRoot(addr, root uintptr) {
 	scanList = header
 }
 
+// Sweep reads the block states in 64-bit words of 32 blocks.
+const (
+	blocksPerStateWord = 8 * blocksPerStateByte
+	stateWordLow       = 0x0F0F0F0F_0F0F0F0F // the low state bit of every block
+	stateWordAllTails  = 0xF0F0F0F0_F0F0F0F0 // every block is a tail
+)
+
+// stateWord returns the word with the states of the blocks b..b+31.
+// b must be a multiple of blocksPerStateWord.
+func stateWord(b gcBlock) *uint64 {
+	return (*uint64)(unsafe.Add(metadataStart, b/blocksPerStateByte))
+}
+
 // Sweep goes through all memory and frees unmarked memory.
 func sweep() uintptr {
 	// Discard the old free ranges list.
@@ -850,7 +871,19 @@ func sweep() uintptr {
 		// Scan backwards until we find a marked head.
 		// Free the blocks as we go.
 		freeEnd := block
-		for block > 0 && (block-1).state() != blockStateMark {
+		for block > 0 {
+			if block%blocksPerStateWord == 0 {
+				// Free all blocks of a word without marked blocks at once.
+				w := stateWord(block - blocksPerStateWord)
+				if *w&(*w>>blocksPerStateByte)&stateWordLow == 0 {
+					*w = 0
+					block -= blocksPerStateWord
+					continue
+				}
+			}
+			if (block - 1).state() == blockStateMark {
+				break
+			}
 			block--
 			block.free()
 		}
@@ -876,8 +909,24 @@ func sweep() uintptr {
 		}
 
 		// Skip the tail.
-		for block > 0 && (block-1).state() == blockStateTail {
+		for block > 0 {
+			if block%blocksPerStateWord == 0 && *stateWord(block - blocksPerStateWord) == stateWordAllTails {
+				block -= blocksPerStateWord
+				continue
+			}
+			if (block - 1).state() != blockStateTail {
+				break
+			}
 			block--
+		}
+	}
+
+	if gcAsserts {
+		// Only manual allocations stay marked.
+		for b := gcBlock(0); b < endBlock; b++ {
+			if b.state() == blockStateMark && (*objHeader)(unsafe.Add(b.pointer(), bytesPerBlock-unsafe.Sizeof(objHeader{}))).next != 1 {
+				runtimeFatal("gc: sweep left a marked block")
+			}
 		}
 	}
 
