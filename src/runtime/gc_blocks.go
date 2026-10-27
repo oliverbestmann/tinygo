@@ -48,10 +48,13 @@ const (
 	bytesPerBlock      = wordsPerBlock * unsafe.Sizeof(heapStart)
 	stateBits          = 2 // how many bits a block state takes (see blockState type)
 	blocksPerStateByte = 8 / stateBits
+	blocksPerPage      = 256 // number of blocks per entry in the page head table
 )
 
 var (
 	metadataStart unsafe.Pointer // pointer to the start of the heap metadata
+	pageHeads     unsafe.Pointer // page head table, stored after the block states
+	pageHeadsSize uintptr        // size of the page head table in bytes
 	scanList      *objHeader     // scanList is a singly linked list of heap objects that have been marked but not scanned
 	freeRanges    *freeRange     // freeRanges is a linked list of free block ranges
 	endBlock      gcBlock        // the block just past the end of the available space
@@ -136,10 +139,57 @@ func (b gcBlock) address() uintptr {
 	return addr
 }
 
+// pageHead returns the page head table entry of page p. A non-zero entry is the
+// head of the object that covers all blocks of the page.
+func pageHead(p uintptr) *gcBlock {
+	return (*gcBlock)(unsafe.Add(pageHeads, p*unsafe.Sizeof(gcBlock(0))))
+}
+
+// setPageHeads sets the entry of every page that lies fully in first..last to head.
+func setPageHeads(first, last, head gcBlock) {
+	end := (uintptr(last) + 1) / blocksPerPage
+	for p := (uintptr(first) + blocksPerPage - 1) / blocksPerPage; p < end; p++ {
+		*pageHead(p) = head
+	}
+}
+
 // findHead returns the head (last block) of an object, assuming the block
 // points to an allocated object. It returns the same block if this block
 // already points to the head.
 func (b gcBlock) findHead() gcBlock {
+	head := b.findHeadFast()
+	if gcAsserts && head != b.findHeadWalk() {
+		runtimeFatal("gc: page head table is out of date")
+	}
+	return head
+}
+
+// findHeadFast walks to the head like findHeadWalk, but uses the page head
+// table to skip pages that are fully covered by one object.
+func (b gcBlock) findHeadFast() gcBlock {
+	if head := *pageHead(uintptr(b) / blocksPerPage); head != 0 {
+		return head
+	}
+	for {
+		stateByte := b.stateByte()
+		if stateByte == blockStateByteAllTails {
+			b += blocksPerStateByte - (b % blocksPerStateByte)
+		} else if b.stateFromByte(stateByte) == blockStateTail {
+			b++
+		} else {
+			return b
+		}
+		// b is still inside the object, so a set entry belongs to this object.
+		if b%blocksPerPage == 0 {
+			if head := *pageHead(uintptr(b) / blocksPerPage); head != 0 {
+				return head
+			}
+		}
+	}
+}
+
+// findHeadWalk finds the head by walking the block states.
+func (b gcBlock) findHeadWalk() gcBlock {
 	for {
 		// Optimization: check whether the current block state byte (which
 		// contains the state of multiple blocks) is composed entirely of tail
@@ -346,7 +396,10 @@ func setHeapEnd(newHeapEnd uintptr) {
 
 	// Save some old variables we need later.
 	oldMetadataStart := metadataStart
-	oldMetadataSize := heapEnd - uintptr(metadataStart)
+	oldMetadataSize := uintptr(pageHeads) - uintptr(metadataStart)
+	oldPageHeads := pageHeads
+	oldPageHeadsSize := pageHeadsSize
+	oldHeapEnd := heapEnd
 
 	// Increase the heap. After setting the new heapEnd, calculateHeapAddresses
 	// will update metadataStart and the memcpy will copy the metadata to the
@@ -358,12 +411,13 @@ func setHeapEnd(newHeapEnd uintptr) {
 	oldEndBlock := endBlock
 	calculateHeapAddresses()
 	memcpy(metadataStart, oldMetadataStart, oldMetadataSize)
+	memcpy(pageHeads, oldPageHeads, oldPageHeadsSize)
 
 	// Note: the memcpy above assumes the heap grows enough so that the new
 	// metadata does not overlap the old metadata. If that isn't true, memmove
 	// should be used to avoid corruption.
 	// This assert checks whether that's true.
-	if gcAsserts && uintptr(metadataStart) < uintptr(oldMetadataStart)+oldMetadataSize {
+	if gcAsserts && uintptr(metadataStart) < oldHeapEnd {
 		runtimeFatal("gc: heap did not grow enough at once")
 	}
 
@@ -385,9 +439,14 @@ func setHeapEnd(newHeapEnd uintptr) {
 func calculateHeapAddresses() {
 	totalSize := heapEnd - heapStart
 
+	// Reserve one page head table entry for every page that may hold blocks.
+	pageHeadsSize = (totalSize/(blocksPerPage*bytesPerBlock) + 1) * unsafe.Sizeof(gcBlock(0))
+	pageHeads = unsafe.Pointer((heapEnd - pageHeadsSize) &^ (unsafe.Alignof(gcBlock(0)) - 1))
+	totalSize = uintptr(pageHeads) - heapStart
+
 	// Allocate some memory to keep 2 bits of information about every block.
 	metadataSize := (totalSize + blocksPerStateByte*bytesPerBlock) / (1 + blocksPerStateByte*bytesPerBlock)
-	metadataStart = unsafe.Pointer(heapEnd - metadataSize)
+	metadataStart = unsafe.Pointer(uintptr(pageHeads) - metadataSize)
 
 	// Use the rest of the available memory as heap.
 	numBlocks := (uintptr(metadataStart) - heapStart) / bytesPerBlock
@@ -482,6 +541,9 @@ func alloc(size uintptr, layout unsafe.Pointer) unsafe.Pointer {
 	block := blockFromAddr(uintptr(pointer))
 	i := block + gcBlock(neededBlocks) - 1
 	i.setState(blockStateHead)
+	if neededBlocks >= blocksPerPage {
+		setPageHeads(block, i, i)
+	}
 	for i != block {
 		i--
 		i.setState(blockStateTail)
@@ -562,6 +624,7 @@ func free(ptr unsafe.Pointer) {
 	for block := firstBlock; block <= lastBlock; block++ {
 		block.free()
 	}
+	setPageHeads(firstBlock, lastBlock, 0)
 	insertFreeRange(firstBlock.pointer(), uintptr(lastBlock-firstBlock+1))
 	gcLock.Unlock()
 }
@@ -578,6 +641,7 @@ func freeTaskStack(addr uintptr) {
 	for block := firstBlock; block <= lastBlock; block++ {
 		block.free()
 	}
+	setPageHeads(firstBlock, lastBlock, 0)
 	insertFreeRange(ptr, uintptr(lastBlock-firstBlock+1))
 	gcLock.Unlock()
 }
@@ -794,6 +858,8 @@ func sweep() uintptr {
 		if freeLen := uintptr(freeEnd - block); freeLen > 0 {
 			// Insert the freed blocks.
 			freeBlocks += freeLen
+			// A page fully covered by a freed object lies fully in this range.
+			setPageHeads(block, freeEnd-1, 0)
 			insertFreeRange(block.pointer(), freeLen)
 		}
 

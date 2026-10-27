@@ -3,6 +3,7 @@ package main
 import (
 	"reflect"
 	"runtime"
+	"unsafe"
 )
 
 var xorshift32State uint32 = 1
@@ -26,6 +27,60 @@ func main() {
 	testGlobalChannelRoots()
 	testReflectRoots()
 	testKeepAlive()
+	testLargeObjects()
+}
+
+var largeBytes [2][]byte
+var largePointers [2][]*int
+
+// testLargeObjects keeps interior pointers into objects that span several
+// pages of the GC page head table, while freed large objects are reused.
+func testLargeObjects() {
+	if ^uintptr(0) <= 0xffff {
+		// Not enough memory on 16-bit devices.
+		println("ok")
+		return
+	}
+	// A page of the page head table is 1024 pointers in size.
+	page := 1024 * int(unsafe.Sizeof(uintptr(0)))
+	for round := 0; round < 30; round++ {
+		for i := range largeBytes {
+			largeBytes[i], largePointers[i] = nil, nil
+
+			b := make([]byte, 2*page+round*40+i*300)
+			for j := range b {
+				b[j] = byte(j + round)
+			}
+			largeBytes[i] = b[len(b)/2:]
+
+			values := make([]int, 3)
+			p := make([]*int, 2048+round*10)
+			for j := range p {
+				p[j] = &values[j%3]
+			}
+			values[0], values[1], values[2] = round, round+1, round+2
+			largePointers[i] = p[len(p)-3:]
+		}
+
+		// Reuse the freed space with small objects.
+		runtime.GC()
+		for i := 0; i < 200; i++ {
+			globalGCClobber = make([]byte, 64)
+		}
+
+		for _, b := range largeBytes {
+			offset := len(b) - 1
+			if b[0]+byte(offset) != b[offset] {
+				panic("large byte slice was overwritten")
+			}
+		}
+		for _, p := range largePointers {
+			if *p[0]+*p[1]+*p[2] != 3*round+3 {
+				panic("large pointer slice was overwritten")
+			}
+		}
+	}
+	println("ok")
 }
 
 var scalarSlices [4][]byte

@@ -854,7 +854,7 @@ func runPlatTests(options compileopts.Options, tests []string, t *testing.T) {
 			t.Parallel()
 			testOptions := compileopts.Options(options)
 			switch name {
-			case "finalizerinvariants.go", "finalizerlarge.go", "interface.go", "interface-blank.go":
+			case "finalizerinvariants.go", "finalizerlarge.go", "gc.go", "interface.go", "interface-blank.go":
 				testOptions.Tags = append(append([]string(nil), options.Tags...), "runtime_asserts")
 			}
 			if testOptions.Target == "simavr" && (name == "math.go" || name == "string.go") {
