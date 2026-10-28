@@ -32,9 +32,8 @@
 # with a slightly different set of tools available.
 {
   inputs = {
-    # Use a recent stable release, but fix the version to make it reproducible.
-    # This version should be updated from time to time.
-    nixpkgs.url = "nixpkgs/nixos-25.11";
+    # unstable, for go_1_27. The lock fixes the version to make it reproducible.
+    nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
   };
   outputs = { self, nixpkgs, flake-utils }:
@@ -44,10 +43,66 @@
       in
       with pkgs;
       {
+        # shortcut: only the sources needed for the wasm targets are installed,
+        # add the other submodules here to support more targets.
+        packages.default = buildGo127Module {
+          pname = "tinygo";
+          version = "0.44.0-dev";
+          src = self;
+          vendorHash = "sha256-YLoanj1gV4NNXQu/d0B/nl9lImh8m4wI/Tc9hpRdgQg=";
+
+          subPackages = [ "." ];
+          tags = [ "llvm20" ];
+          ldflags = [
+            # tinygo keys its cache on the build id, buildGoModule would leave it empty
+            "-buildid=${self.rev or self.dirtyRev or "dirty"}"
+            "-X github.com/tinygo-org/tinygo/goenv.TINYGOROOT=${placeholder "out"}/share/tinygo"
+            "-X github.com/tinygo-org/tinygo/goenv.clangResourceDir=${llvmPackages_20.clang.cc.lib}/lib/clang/20"
+          ];
+
+          nativeBuildInputs = [ makeWrapper ];
+          buildInputs = [
+            llvmPackages_20.llvm
+            llvmPackages_20.libclang
+          ];
+          doCheck = false;
+          # the wrapper puts go on PATH
+          allowGoReference = true;
+
+          # flake sources come without submodules, keep these revisions in sync with them
+          postInstall = ''
+            root=$out/share/tinygo
+            mkdir -p $root/lib
+            cp -r src targets $root/
+            rm -rf $root/src/net
+            cp -r ${fetchFromGitHub {
+              owner = "tinygo-org";
+              repo = "net";
+              rev = "70037cf71f1ae14175781e162c9c76d1ac730ece";
+              hash = "sha256-k1gGbXm4oO5lh5pP0I8rI1XZQNDG2fBmvvgdHsVrG3w=";
+            }} $root/src/net
+            cp -r ${fetchFromGitHub {
+              owner = "WebAssembly";
+              repo = "wasi-libc";
+              rev = "1dfe5c302d1c5ab621f7abf04620fae92700fd22";
+              hash = "sha256-Km0HPHXFfN373zW+jdND7vB4/R589uXPe5KcvmAN+nw=";
+            }} $root/lib/wasi-libc
+            cp -r ${llvmPackages_20.compiler-rt.src}/compiler-rt/lib/builtins $root/lib/compiler-rt-builtins
+            chmod -R u+w $root
+
+            wrapProgram $out/bin/tinygo --prefix PATH : ${lib.makeBinPath [
+              go_1_27
+              llvmPackages_20.clang.cc
+              llvmPackages_20.lld
+              binaryen
+            ]}
+          '';
+        };
+
         devShells.default = mkShell {
           buildInputs = [
             # These dependencies are required for building tinygo (go install).
-            go
+            go_1_27
             llvmPackages_20.llvm
             llvmPackages_20.libclang
             # Additional dependencies needed at runtime, for building and/or
